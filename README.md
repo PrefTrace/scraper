@@ -32,6 +32,36 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Получение каталога AppID
+
+Для получения только идентификаторов приложений используется официальный
+`IStoreService/GetAppList`; карточки игр и сопроводительные данные не загружаются:
+
+```python
+import asyncio
+
+from scraper import get_app_ids
+
+
+async def main() -> None:
+    app_ids = await get_app_ids(
+        api_key="STEAM_WEB_API_KEY",
+        include_games=True,
+        include_dlc=True,
+        include_software=True,
+        include_videos=True,
+        include_hardware=True,
+    )
+    print(len(app_ids), app_ids[:10])
+
+
+asyncio.run(main())
+```
+
+Метод проходит все страницы официального каталога, удаляет дубликаты и
+возвращает отсортированный `list[int]`. Для проверки можно ограничить результат
+параметром `max_app_ids`; по умолчанию собирается максимально полный каталог.
+
 ## Разработка
 
 ```powershell

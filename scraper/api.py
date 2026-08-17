@@ -12,6 +12,7 @@ from scraper.diagnostics import Diagnostic
 from scraper.hltb import fetch_hltb
 from scraper.metacritic import fetch_metacritic
 from scraper.models import Game, MetacriticData, ReviewCollection
+from scraper.steam.apps import fetch_app_ids
 from scraper.steam.client import SteamClient
 from scraper.steam.locales import (
     DEFAULT_STORE_COUNTRY,
@@ -72,6 +73,38 @@ def _steam_metacritic(data: dict[str, Any]) -> MetacriticData | None:
     if not url and score is None:
         return None
     return MetacriticData(url=url, critic_score=score, platform="pc")
+
+
+async def get_app_ids(
+    api_key: str,
+    *,
+    max_app_ids: int | None = None,
+    include_games: bool = True,
+    include_dlc: bool = True,
+    include_software: bool = True,
+    include_videos: bool = True,
+    include_hardware: bool = True,
+) -> list[int]:
+    """Return unique Steam app IDs from the official paginated app catalog."""
+    timeout = httpx.Timeout(35.0, connect=15.0)
+    limits = httpx.Limits(max_connections=4, max_keepalive_connections=2)
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; game-scraper/1.0)"}
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        limits=limits,
+        headers=headers,
+        follow_redirects=True,
+    ) as http:
+        return await fetch_app_ids(
+            SteamClient(http),
+            api_key=api_key,
+            max_app_ids=max_app_ids,
+            include_games=include_games,
+            include_dlc=include_dlc,
+            include_software=include_software,
+            include_videos=include_videos,
+            include_hardware=include_hardware,
+        )
 
 
 async def scrape(

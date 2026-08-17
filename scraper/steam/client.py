@@ -91,6 +91,38 @@ class SteamClient:
         )
         return response.text
 
+    async def store_app_list_page(
+        self,
+        *,
+        api_key: str,
+        last_appid: int | None = None,
+        max_results: int = 50_000,
+        include_games: bool = True,
+        include_dlc: bool = True,
+        include_software: bool = True,
+        include_videos: bool = True,
+        include_hardware: bool = True,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "key": api_key,
+            "max_results": max_results,
+            "include_games": int(include_games),
+            "include_dlc": int(include_dlc),
+            "include_software": int(include_software),
+            "include_videos": int(include_videos),
+            "include_hardware": int(include_hardware),
+        }
+        if last_appid is not None:
+            params["last_appid"] = last_appid
+        response = await self._get(
+            "https://api.steampowered.com/IStoreService/GetAppList/v1/",
+            params=params,
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SteamClientError("Unexpected Steam app list response")
+        return payload
+
     async def review_page(
         self,
         app_id: int,
