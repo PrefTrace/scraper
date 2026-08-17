@@ -145,29 +145,22 @@ async def scrape(
             for locale, details in details_by_locale.items()
         }
 
-        store_html, store_diag = await _gather_optional(
+        steam_meta = _steam_metacritic(base_details)
+        title = localizations[first_locale.requested].name or str(app_id)
+
+        # Everything below depends only on appdetails and can run concurrently.
+        store_task = _gather_optional(
             steam.store_page(app_id, primary, store_country=store_country),
             source="steam_store_html",
             code="page_unavailable",
             message="Steam Store HTML page unavailable",
         )
-        if store_diag:
-            diagnostics.append(store_diag)
-
-        achievement_html, achievement_diag = await _gather_optional(
+        achievement_task = _gather_optional(
             steam.achievements_page(app_id, primary),
             source="steam_achievements",
             code="page_unavailable",
             message="Steam achievements page unavailable",
         )
-        if achievement_diag:
-            diagnostics.append(achievement_diag)
-
-        if isinstance(store_html, str):
-            table_languages = parse_language_table(store_html)
-            if table_languages:
-                base["supported_languages"] = table_languages
-            base["tags"] = parse_tags(store_html)
 
         summary_task = _gather_optional(
             fetch_summary(steam, app_id, store_country=store_country),
@@ -213,12 +206,59 @@ async def scrape(
             code="negative_reviews_unavailable",
             message="Negative Steam reviews unavailable",
         )
-        summary_result, *locale_results, positive_result, negative_result = await asyncio.gather(
+
+        hltb_task = _gather_optional(
+            fetch_hltb(title),
+            source="hltb",
+            code="provider_failed",
+            message="HowLongToBeat provider failed",
+        )
+        metacritic_url = str(steam_meta.url) if steam_meta and steam_meta.url else None
+        metacritic_score = steam_meta.critic_score if steam_meta else None
+        metacritic_task = _gather_optional(
+            fetch_metacritic(
+                http,
+                title=title,
+                steam_url=metacritic_url,
+                critic_score=metacritic_score,
+            ),
+            source="metacritic",
+            code="provider_failed",
+            message="Metacritic provider failed",
+        )
+
+        gathered_results = await asyncio.gather(
+            store_task,
+            achievement_task,
             summary_task,
             *locale_summary_tasks,
             positive_task,
             negative_task,
+            hltb_task,
+            metacritic_task,
         )
+        store_result = gathered_results[0]
+        achievement_result = gathered_results[1]
+        summary_result = gathered_results[2]
+        locale_results = gathered_results[3 : 3 + len(locales)]
+        positive_result = gathered_results[3 + len(locales)]
+        negative_result = gathered_results[4 + len(locales)]
+        hltb_provider_result = gathered_results[5 + len(locales)]
+        metacritic_provider_result = gathered_results[6 + len(locales)]
+
+        store_html, store_diag = store_result
+        if store_diag:
+            diagnostics.append(store_diag)
+        achievement_html, achievement_diag = achievement_result
+        if achievement_diag:
+            diagnostics.append(achievement_diag)
+
+        if isinstance(store_html, str):
+            table_languages = parse_language_table(store_html)
+            if table_languages:
+                base["supported_languages"] = table_languages
+            base["tags"] = parse_tags(store_html)
+
         summary, summary_diag = summary_result
         if summary_diag:
             diagnostics.append(summary_diag)
@@ -260,31 +300,6 @@ async def scrape(
             parse_achievements(achievement_html)
             if isinstance(achievement_html, str)
             else []
-        )
-        steam_meta = _steam_metacritic(base_details)
-        title = localizations[first_locale.requested].name or str(app_id)
-        hltb_task = _gather_optional(
-            fetch_hltb(title),
-            source="hltb",
-            code="provider_failed",
-            message="HowLongToBeat provider failed",
-        )
-        metacritic_url = str(steam_meta.url) if steam_meta and steam_meta.url else None
-        metacritic_score = steam_meta.critic_score if steam_meta else None
-        metacritic_task = _gather_optional(
-            fetch_metacritic(
-                http,
-                title=title,
-                steam_url=metacritic_url,
-                critic_score=metacritic_score,
-            ),
-            source="metacritic",
-            code="provider_failed",
-            message="Metacritic provider failed",
-        )
-        (hltb_provider_result, metacritic_provider_result) = await asyncio.gather(
-            hltb_task,
-            metacritic_task,
         )
         hltb_provider, hltb_outer_diag = hltb_provider_result
         metacritic_provider, metacritic_outer_diag = metacritic_provider_result
