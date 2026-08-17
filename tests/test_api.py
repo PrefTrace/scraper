@@ -147,8 +147,8 @@ async def test_scrape_returns_normalized_partial_result(monkeypatch: pytest.Monk
         if "store.steampowered.com/api/appdetails" in str(call.request.url)
     ]
     assert {(request.url.params["cc"], request.url.params["l"]) for request in detail_requests} == {
-        ("kz", "ru"),
-        ("kz", "en"),
+        ("kz", "russian"),
+        ("kz", "english"),
     }
 
     store_requests = [
@@ -157,3 +157,12 @@ async def test_scrape_returns_normalized_partial_result(monkeypatch: pytest.Monk
         if "store.steampowered.com/app/620/" in str(call.request.url)
     ]
     assert store_requests[0].url.params["cc"] == "kz"
+    assert store_requests[0].url.params["l"] == "russian"
+
+    localized_summary_requests = {
+        call.request.url.params["language"]
+        for call in respx.calls
+        if "store.steampowered.com/appreviews/620" in str(call.request.url)
+        and call.request.url.params["review_type"] == "all"
+    }
+    assert localized_summary_requests == {"all", "russian", "english"}

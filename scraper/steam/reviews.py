@@ -134,7 +134,7 @@ async def fetch_summary(
     locale: LocaleInfo | None = None,
     store_country: str | None = None,
 ) -> RatingSummary:
-    language = locale.web_language if locale else "all"
+    language = locale.steam_language if locale else "all"
     payload = await client.review_page(
         app_id,
         language=language,

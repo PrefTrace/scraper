@@ -41,7 +41,7 @@ class SteamClient:
         locale: LocaleInfo,
         store_country: str | None,
     ) -> dict[str, str]:
-        params = {"l": locale.web_language}
+        params = {"l": locale.steam_language}
         if store_country is not None:
             params["cc"] = store_country
         return params
@@ -87,7 +87,7 @@ class SteamClient:
     async def achievements_page(self, app_id: int, locale: LocaleInfo) -> str:
         response = await self._get(
             f"https://steamcommunity.com/stats/{app_id}/achievements/",
-            params={"l": locale.web_language},
+            params={"l": locale.steam_language},
         )
         return response.text
 
