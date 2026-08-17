@@ -1,0 +1,6 @@
+httpx>=0.28,<1
+pydantic>=2.10,<3
+selectolax>=0.3.26,<1
+rapidfuzz>=3.10,<4
+howlongtobeatpy>=1.0.22,<2
+
