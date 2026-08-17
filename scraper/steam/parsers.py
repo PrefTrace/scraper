@@ -14,6 +14,7 @@ from scraper.models import (
     LocalizedGameInfo,
     MediaImage,
     MediaVideo,
+    PriceOverview,
     Requirements,
     RequirementsByOs,
     Tag,
@@ -130,6 +131,30 @@ def parse_requirements(data: dict[str, Any] | None) -> Requirements | None:
     if minimum is None and recommended is None:
         return None
     return Requirements(minimum=minimum, recommended=recommended)
+
+
+def parse_price(data: Any) -> PriceOverview | None:
+    if not isinstance(data, dict):
+        return None
+    currency = data.get("currency")
+    if not isinstance(currency, str) or not currency.strip():
+        return None
+    return PriceOverview(
+        currency=currency,
+        initial=_parse_int(data.get("initial")),
+        final=_parse_int(data.get("final")),
+        discount_percent=_parse_int(data.get("discount_percent")),
+        initial_formatted=(
+            data["initial_formatted"]
+            if isinstance(data.get("initial_formatted"), str)
+            else None
+        ),
+        final_formatted=(
+            data["final_formatted"]
+            if isinstance(data.get("final_formatted"), str)
+            else None
+        ),
+    )
 
 
 def parse_languages_fallback(value: str | None) -> list[LanguageSupport]:
@@ -258,6 +283,8 @@ def parse_app_details(
             ),
         ),
         "type": data.get("type"),
+        "is_free": _parse_bool(data.get("is_free")),
+        "price": parse_price(data.get("price_overview")),
         "developers": [str(item) for item in data.get("developers", [])],
         "publishers": [str(item) for item in data.get("publishers", [])],
         "release_date": release_date,

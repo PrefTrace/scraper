@@ -355,6 +355,8 @@ async def scrape(
             app_id=app_id,
             store_url=f"https://store.steampowered.com/app/{app_id}/",
             store_country=store_country,
+            is_free=base["is_free"],
+            price=base["price"],
             localizations=localizations,
             type=base["type"],
             developers=base["developers"],

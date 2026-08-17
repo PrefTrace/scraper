@@ -21,6 +21,15 @@ DETAILS = {
     "categories": [{"id": 2, "description": "Single-player"}],
     "genres": [{"id": "1", "description": "Action"}],
     "supported_languages": "English<strong>*</strong>, Russian",
+    "is_free": False,
+    "price_overview": {
+        "currency": "KZT",
+        "initial": 1000,
+        "final": 800,
+        "discount_percent": 20,
+        "initial_formatted": "10 ₸",
+        "final_formatted": "8 ₸",
+    },
     "release_date": {"coming_soon": False, "date": "Apr 18, 2011"},
     "screenshots": [],
     "movies": [],
@@ -132,6 +141,10 @@ async def test_scrape_returns_normalized_partial_result(monkeypatch: pytest.Monk
 
     assert result.app_id == 620
     assert result.store_country == "kz"
+    assert result.is_free is False
+    assert result.price is not None
+    assert result.price.currency == "KZT"
+    assert result.price.final_formatted == "8 ₸"
     assert set(result.localizations) == {"ru-RU", "en-US"}
     assert {item.store_country for item in result.localizations.values()} == {"kz"}
     assert result.tags[0].name == "Puzzle"

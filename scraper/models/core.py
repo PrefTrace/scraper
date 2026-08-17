@@ -159,11 +159,24 @@ class MetacriticData(Model):
     platform: str | None = None
 
 
+class PriceOverview(Model):
+    """Steam price for the requested store country; amounts are in minor units."""
+
+    currency: str
+    initial: int | None = None
+    final: int | None = None
+    discount_percent: int | None = None
+    initial_formatted: str | None = None
+    final_formatted: str | None = None
+
+
 class Game(Model):
     platform: str = "steam"
     app_id: int
     store_url: str
     store_country: str | None = None
+    is_free: bool | None = None
+    price: PriceOverview | None = None
     type: str | None = None
     localizations: dict[str, LocalizedGameInfo] = Field(default_factory=dict)
     developers: list[str] = Field(default_factory=list)

@@ -51,6 +51,15 @@ def test_app_details_preserve_html_and_plain_text() -> None:
         "categories": [{"id": 2, "description": "Single-player"}],
         "genres": [{"id": "1", "description": "Action"}],
         "supported_languages": "English<strong>*</strong>, Russian",
+        "is_free": False,
+        "price_overview": {
+            "currency": "KZT",
+            "initial": 199900,
+            "final": 99900,
+            "discount_percent": 50,
+            "initial_formatted": "",
+            "final_formatted": "999 ₸",
+        },
     }
     parsed = parse_app_details(data, normalize_locale("en-US"), store_country="kz")
     localized = parsed["localized"]
@@ -62,3 +71,7 @@ def test_app_details_preserve_html_and_plain_text() -> None:
     assert localized.full_description.text == "Full description"
     assert parsed["release_date"].isoformat() == "2011-04-18"
     assert parsed["supported_languages"][0].full_audio is True
+    assert parsed["is_free"] is False
+    assert parsed["price"].currency == "KZT"
+    assert parsed["price"].final == 99900
+    assert parsed["price"].final_formatted == "999 ₸"
