@@ -16,7 +16,7 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
-async def fetch_hltb(game_name: str) -> tuple[HltbData | None, Diagnostic | None]:
+async def _load_hltb(game_name: str) -> tuple[HltbData | None, Diagnostic | None]:
     """Find the best HLTB result for a Steam title using the library's async API."""
     normalized_name = re.sub(r"[™®�]", "", game_name)
     normalized_name = re.sub(r"\s+", " ", normalized_name).strip()
@@ -84,5 +84,4 @@ async def fetch_hltb(game_name: str) -> tuple[HltbData | None, Diagnostic | None
         main_extra_hours=_as_float(best.main_extra),
         completionist_hours=_as_float(best.completionist),
         all_styles_hours=_as_float(best.all_styles),
-        raw=best.json_content if isinstance(best.json_content, dict) else {},
     ), None

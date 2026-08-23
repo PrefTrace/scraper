@@ -83,7 +83,7 @@ def parse_review(payload: dict[str, Any], app_id: int) -> Review:
     )
 
 
-async def collect_reviews(
+async def _collect_reviews(
     client: SteamClient,
     app_id: int,
     *,
@@ -127,7 +127,7 @@ async def collect_reviews(
     return collected[:count]
 
 
-async def fetch_summary(
+async def _fetch_summary(
     client: SteamClient,
     app_id: int,
     *,

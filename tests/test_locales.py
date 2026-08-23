@@ -1,6 +1,5 @@
 import pytest
 
-from scraper.api import extract_app_id
 from scraper.steam.locales import normalize_locale, normalize_locales, normalize_store_country
 
 
@@ -26,9 +25,6 @@ def test_locales_are_deduplicated() -> None:
     assert [item.requested for item in result] == ["en-US", "ru-RU"]
 
 
-def test_invalid_locale_and_url_are_rejected() -> None:
+def test_invalid_locale_is_rejected() -> None:
     with pytest.raises(ValueError):
         normalize_locale("xx-XX")
-    with pytest.raises(ValueError):
-        extract_app_id("https://steamcommunity.com/app/620/")
-    assert extract_app_id("https://store.steampowered.com/app/620/Portal_2/?cc=us") == 620

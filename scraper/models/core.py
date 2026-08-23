@@ -1,9 +1,6 @@
-from datetime import date, datetime
-from typing import Any
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from scraper.diagnostics import Diagnostic
 
 
 class Model(BaseModel):
@@ -148,7 +145,6 @@ class HltbData(Model):
     main_extra_hours: float | None = None
     completionist_hours: float | None = None
     all_styles_hours: float | None = None
-    raw: dict[str, Any] = Field(default_factory=dict)
 
 
 class MetacriticData(Model):
@@ -168,38 +164,3 @@ class PriceOverview(Model):
     discount_percent: int | None = None
     initial_formatted: str | None = None
     final_formatted: str | None = None
-
-
-class Game(Model):
-    platform: str = "steam"
-    app_id: int
-    store_url: str
-    store_country: str | None = None
-    is_free: bool | None = None
-    price: PriceOverview | None = None
-    type: str | None = None
-    localizations: dict[str, LocalizedGameInfo] = Field(default_factory=dict)
-    developers: list[str] = Field(default_factory=list)
-    publishers: list[str] = Field(default_factory=list)
-    release_date: date | None = None
-    release_date_raw: str | None = None
-    coming_soon: bool | None = None
-    screenshots: list[MediaImage] = Field(default_factory=list)
-    videos: list[MediaVideo] = Field(default_factory=list)
-    header_image: str | None = None
-    website: str | None = None
-    requirements: RequirementsByOs = Field(default_factory=RequirementsByOs)
-    supported_languages: list[LanguageSupport] = Field(default_factory=list)
-    platforms: dict[str, bool] = Field(default_factory=dict)
-    categories: list[Category] = Field(default_factory=list)
-    genres: list[str] = Field(default_factory=list)
-    tags: list[Tag] = Field(default_factory=list)
-    age_ratings: list[AgeRating] = Field(default_factory=list)
-    achievements: list[Achievement] = Field(default_factory=list)
-    achievements_url: str | None = None
-    steam_rating: RatingSummary | None = None
-    ratings_by_locale: dict[str, RatingSummary] = Field(default_factory=dict)
-    reviews: ReviewCollection = Field(default_factory=ReviewCollection)
-    metacritic: MetacriticData | None = None
-    how_long_to_beat: HltbData | None = None
-    diagnostics: list[Diagnostic] = Field(default_factory=list)

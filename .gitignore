@@ -151,7 +151,12 @@ activemq-data/
 .env
 .envrc
 .venv
-demo/
+demo/*
+!demo/benchmark_wikidata.py
+!demo/wikidata_benchmark.json
+!demo/wikidata.sqlite3
+!demo/wikidata_samples.md
+!demo/wikidata_tz_gap_report.md
 env/
 venv/
 ENV/

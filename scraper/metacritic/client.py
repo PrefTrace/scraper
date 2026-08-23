@@ -104,7 +104,7 @@ def parse_metacritic_html(html: str, url: str) -> MetacriticData:
     )
 
 
-async def fetch_metacritic(
+async def _load_metacritic(
     client: httpx.AsyncClient,
     *,
     title: str,
