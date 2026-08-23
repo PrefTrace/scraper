@@ -39,8 +39,22 @@ class TaskState:
     status: str = "pending"
     last_error: str | None = None
     result: object | None = None
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    enqueued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     subscribers: set[TaskSubscriber] = field(default_factory=set)
+
+    @property
+    def wait_seconds(self) -> float | None:
+        if self.started_at is None:
+            return None
+        return (self.started_at - self.enqueued_at).total_seconds()
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.started_at is None or self.completed_at is None:
+            return None
+        return (self.completed_at - self.started_at).total_seconds()
 
 
 @dataclass(frozen=True, slots=True)

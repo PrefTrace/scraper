@@ -20,6 +20,8 @@ class InMemoryTaskQueue:
     def __init__(self, queue_names: Iterable[str]) -> None:
         self._queues = {name: asyncio.Queue[QueueTask]() for name in set(queue_names)}
         self._states: dict[tuple[str, str], TaskState] = {}
+        self._enqueue_attempts: dict[str, int] = {name: 0 for name in self._queues}
+        self._enqueue_created: dict[str, int] = {name: 0 for name in self._queues}
         self._lock = asyncio.Lock()
         self._idle = asyncio.Event()
         self._idle.set()
@@ -35,6 +37,7 @@ class InMemoryTaskQueue:
             raise KeyError(f"Unknown queue: {task.queue}")
         key = (task.queue, task.task_key)
         async with self._lock:
+            self._enqueue_attempts[task.queue] += 1
             state = self._states.get(key)
             if state is not None:
                 if subscriber is not None:
@@ -44,6 +47,7 @@ class InMemoryTaskQueue:
             if subscriber is not None:
                 state.subscribers.add(subscriber)
             self._states[key] = state
+            self._enqueue_created[task.queue] += 1
             self._idle.clear()
             self._queues[task.queue].put_nowait(task)
             return EnqueueResult(task=task, created=True, state=state)
@@ -52,6 +56,7 @@ class InMemoryTaskQueue:
         async with self._lock:
             state = self._states[(task.queue, task.task_key)]
             state.status = "running"
+            state.started_at = datetime.now(UTC)
             return state
 
     async def complete(
@@ -66,7 +71,7 @@ class InMemoryTaskQueue:
             state.status = "failed" if error is not None else "done"
             state.last_error = str(error) if error is not None else None
             state.result = result
-            state.updated_at = datetime.now(UTC)
+            state.completed_at = datetime.now(UTC)
             self._queues[task.queue].task_done()
             if not any(item.qsize() for item in self._queues.values()) and not any(
                 item.status == "running" for item in self._states.values()
@@ -112,6 +117,18 @@ class InMemoryTaskQueue:
     async def states(self) -> list[TaskState]:
         async with self._lock:
             return list(self._states.values())
+
+    async def enqueue_metrics(self) -> dict[str, dict[str, int]]:
+        async with self._lock:
+            return {
+                queue: {
+                    "attempted": self._enqueue_attempts[queue],
+                    "created": self._enqueue_created[queue],
+                    "deduplicated": self._enqueue_attempts[queue]
+                    - self._enqueue_created[queue],
+                }
+                for queue in self._queues
+            }
 
 
 __all__ = ["InMemoryTaskQueue", "TaskHandler"]

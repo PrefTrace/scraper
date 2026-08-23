@@ -1,0 +1,1440 @@
+{
+  "started_at_utc": "2026-08-23T06:20:42Z",
+  "input_file": "C:\\Users\\miskl\\OneDrive\\Документы\\GitHub\\scraper\\appids.txt",
+  "limit": 5,
+  "app_ids": [
+    292030,
+    294100,
+    236390,
+    1272320,
+    271590
+  ],
+  "database_file": "C:\\Users\\miskl\\OneDrive\\Документы\\GitHub\\scraper\\demo\\new_run\\pipeline.sqlite3",
+  "added_primary_tasks": 5,
+  "elapsed_seconds": 68.4897,
+  "queue_metrics": {
+    "total_tasks": 60,
+    "total_done": 60,
+    "total_failed": 0,
+    "queues": {
+      "steam": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 24.8633,
+          "avg_seconds": 4.9727,
+          "p95_seconds": 10.531
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 13.7478,
+          "avg_seconds": 2.7496,
+          "p95_seconds": 3.2975
+        },
+        "enqueue": {
+          "attempted": 5,
+          "created": 5,
+          "deduplicated": 0
+        }
+      },
+      "wikidata": {
+        "tasks": 35,
+        "done": 35,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 35,
+          "total_seconds": 676.1459,
+          "avg_seconds": 19.3185,
+          "p95_seconds": 40.6575
+        },
+        "duration": {
+          "count": 35,
+          "total_seconds": 66.2769,
+          "avg_seconds": 1.8936,
+          "p95_seconds": 9.3267
+        },
+        "enqueue": {
+          "attempted": 51,
+          "created": 35,
+          "deduplicated": 16
+        }
+      },
+      "steamspy": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 3.5875,
+          "avg_seconds": 0.7175,
+          "p95_seconds": 1.7159
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 10.3551,
+          "avg_seconds": 2.071,
+          "p95_seconds": 4.0382
+        },
+        "enqueue": {
+          "attempted": 5,
+          "created": 5,
+          "deduplicated": 0
+        }
+      },
+      "pcgamingwiki": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 37.0879,
+          "avg_seconds": 7.4176,
+          "p95_seconds": 11.7653
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 27.8414,
+          "avg_seconds": 5.5683,
+          "p95_seconds": 8.6039
+        },
+        "enqueue": {
+          "attempted": 5,
+          "created": 5,
+          "deduplicated": 0
+        }
+      },
+      "hltb": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 42.5967,
+          "avg_seconds": 8.5193,
+          "p95_seconds": 12.3173
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 28.3417,
+          "avg_seconds": 5.6683,
+          "p95_seconds": 8.6658
+        },
+        "enqueue": {
+          "attempted": 5,
+          "created": 5,
+          "deduplicated": 0
+        }
+      },
+      "metacritic": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 15.6755,
+          "avg_seconds": 3.1351,
+          "p95_seconds": 6.0068
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 16.1192,
+          "avg_seconds": 3.2238,
+          "p95_seconds": 7.9341
+        },
+        "enqueue": {
+          "attempted": 5,
+          "created": 5,
+          "deduplicated": 0
+        }
+      }
+    },
+    "task_types": {
+      "hltb:game": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 42.5967,
+          "avg_seconds": 8.5193,
+          "p95_seconds": 12.3173
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 28.3417,
+          "avg_seconds": 5.6683,
+          "p95_seconds": 8.6658
+        }
+      },
+      "metacritic:game": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 15.6755,
+          "avg_seconds": 3.1351,
+          "p95_seconds": 6.0068
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 16.1192,
+          "avg_seconds": 3.2238,
+          "p95_seconds": 7.9341
+        }
+      },
+      "pcgamingwiki:game": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 37.0879,
+          "avg_seconds": 7.4176,
+          "p95_seconds": 11.7653
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 27.8414,
+          "avg_seconds": 5.5683,
+          "p95_seconds": 8.6039
+        }
+      },
+      "steam:game": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 24.8633,
+          "avg_seconds": 4.9727,
+          "p95_seconds": 10.531
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 13.7478,
+          "avg_seconds": 2.7496,
+          "p95_seconds": 3.2975
+        }
+      },
+      "steamspy:game": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 3.5875,
+          "avg_seconds": 0.7175,
+          "p95_seconds": 1.7159
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 10.3551,
+          "avg_seconds": 2.071,
+          "p95_seconds": 4.0382
+        }
+      },
+      "wikidata:entity": {
+        "tasks": 23,
+        "done": 23,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 23,
+          "total_seconds": 438.4454,
+          "avg_seconds": 19.0628,
+          "p95_seconds": 38.939
+        },
+        "duration": {
+          "count": 23,
+          "total_seconds": 19.8517,
+          "avg_seconds": 0.8631,
+          "p95_seconds": 1.1427
+        }
+      },
+      "wikidata:game": {
+        "tasks": 5,
+        "done": 5,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 5,
+          "total_seconds": 68.1535,
+          "avg_seconds": 13.6307,
+          "p95_seconds": 25.8594
+        },
+        "duration": {
+          "count": 5,
+          "total_seconds": 39.6873,
+          "avg_seconds": 7.9375,
+          "p95_seconds": 15.7123
+        }
+      },
+      "wikidata:organization_name": {
+        "tasks": 7,
+        "done": 7,
+        "failed": 0,
+        "pending_or_running": 0,
+        "wait": {
+          "count": 7,
+          "total_seconds": 169.547,
+          "avg_seconds": 24.221,
+          "p95_seconds": 41.4268
+        },
+        "duration": {
+          "count": 7,
+          "total_seconds": 6.7378,
+          "avg_seconds": 0.9625,
+          "p95_seconds": 1.6873
+        }
+      }
+    },
+    "tasks": [
+      {
+        "queue": "hltb",
+        "task_key": "hltb:game:1272320",
+        "task_type": "game",
+        "app_id": 1272320,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 11.714,
+        "duration_seconds": 3.8202,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "hltb",
+        "task_key": "hltb:game:236390",
+        "task_type": "game",
+        "app_id": 236390,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 10.6268,
+        "duration_seconds": 3.8436,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "hltb",
+        "task_key": "hltb:game:271590",
+        "task_type": "game",
+        "app_id": 271590,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 12.3173,
+        "duration_seconds": 5.1918,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "hltb",
+        "task_key": "hltb:game:292030",
+        "task_type": "game",
+        "app_id": 292030,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 1.2852,
+        "duration_seconds": 8.6658,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "hltb",
+        "task_key": "hltb:game:294100",
+        "task_type": "game",
+        "app_id": 294100,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 6.6534,
+        "duration_seconds": 6.8204,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "metacritic",
+        "task_key": "metacritic:game:1272320",
+        "task_type": "game",
+        "app_id": 1272320,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 4.6262,
+        "duration_seconds": 1.4283,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "metacritic",
+        "task_key": "metacritic:game:236390",
+        "task_type": "game",
+        "app_id": 236390,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 6.0068,
+        "duration_seconds": 1.3758,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "metacritic",
+        "task_key": "metacritic:game:271590",
+        "task_type": "game",
+        "app_id": 271590,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 2.8376,
+        "duration_seconds": 2.4491,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "metacritic",
+        "task_key": "metacritic:game:292030",
+        "task_type": "game",
+        "app_id": 292030,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 1.2852,
+        "duration_seconds": 2.9319,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "metacritic",
+        "task_key": "metacritic:game:294100",
+        "task_type": "game",
+        "app_id": 294100,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.9197,
+        "duration_seconds": 7.9341,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "pcgamingwiki",
+        "task_key": "pcgamingwiki:game:1272320",
+        "task_type": "game",
+        "app_id": 1272320,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 10.168,
+        "duration_seconds": 4.8142,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "pcgamingwiki",
+        "task_key": "pcgamingwiki:game:236390",
+        "task_type": "game",
+        "app_id": 236390,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 8.1209,
+        "duration_seconds": 4.8035,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "pcgamingwiki",
+        "task_key": "pcgamingwiki:game:271590",
+        "task_type": "game",
+        "app_id": 271590,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 11.7653,
+        "duration_seconds": 4.8221,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "pcgamingwiki",
+        "task_key": "pcgamingwiki:game:292030",
+        "task_type": "game",
+        "app_id": 292030,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.8637,
+        "duration_seconds": 8.6039,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "pcgamingwiki",
+        "task_key": "pcgamingwiki:game:294100",
+        "task_type": "game",
+        "app_id": 294100,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 6.17,
+        "duration_seconds": 4.7978,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steam",
+        "task_key": "steam:game:1272320",
+        "task_type": "game",
+        "app_id": 1272320,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 7.7746,
+        "duration_seconds": 2.7564,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steam",
+        "task_key": "steam:game:236390",
+        "task_type": "game",
+        "app_id": 236390,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 4.9276,
+        "duration_seconds": 2.8469,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steam",
+        "task_key": "steam:game:271590",
+        "task_type": "game",
+        "app_id": 271590,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 10.531,
+        "duration_seconds": 3.2169,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steam",
+        "task_key": "steam:game:292030",
+        "task_type": "game",
+        "app_id": 292030,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.0001,
+        "duration_seconds": 1.63,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steam",
+        "task_key": "steam:game:294100",
+        "task_type": "game",
+        "app_id": 294100,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 1.6301,
+        "duration_seconds": 3.2975,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steamspy",
+        "task_key": "steamspy:game:1272320",
+        "task_type": "game",
+        "app_id": 1272320,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 1.7159,
+        "duration_seconds": 2.0693,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steamspy",
+        "task_key": "steamspy:game:236390",
+        "task_type": "game",
+        "app_id": 236390,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.4341,
+        "duration_seconds": 4.0382,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steamspy",
+        "task_key": "steamspy:game:271590",
+        "task_type": "game",
+        "app_id": 271590,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.5683,
+        "duration_seconds": 0.6532,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steamspy",
+        "task_key": "steamspy:game:292030",
+        "task_type": "game",
+        "app_id": 292030,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.4453,
+        "duration_seconds": 2.4903,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "steamspy",
+        "task_key": "steamspy:game:294100",
+        "task_type": "game",
+        "app_id": 294100,
+        "entity_key": null,
+        "status": "done",
+        "wait_seconds": 0.424,
+        "duration_seconds": 1.1042,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q1023212:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q1023212",
+        "status": "done",
+        "wait_seconds": 21.6393,
+        "duration_seconds": 0.8283,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q110856501:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q110856501",
+        "status": "done",
+        "wait_seconds": 20.9307,
+        "duration_seconds": 0.4347,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q110856547:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q110856547",
+        "status": "done",
+        "wait_seconds": 21.3606,
+        "duration_seconds": 0.7582,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q1172164:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q1172164",
+        "status": "done",
+        "wait_seconds": 19.4343,
+        "duration_seconds": 1.0981,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q11835640:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q11835640",
+        "status": "done",
+        "wait_seconds": 25.5386,
+        "duration_seconds": 0.8556,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q14594724:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q14594724",
+        "status": "done",
+        "wait_seconds": 5.4807,
+        "duration_seconds": 0.449,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q153616:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q153616",
+        "status": "done",
+        "wait_seconds": 12.8972,
+        "duration_seconds": 1.0501,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q19005369:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q19005369",
+        "status": "done",
+        "wait_seconds": 23.3887,
+        "duration_seconds": 1.1151,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q19005837:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q19005837",
+        "status": "done",
+        "wait_seconds": 24.4982,
+        "duration_seconds": 1.0472,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q19581568:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q19581568",
+        "status": "done",
+        "wait_seconds": 38.939,
+        "duration_seconds": 0.4451,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q1984338:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q1984338",
+        "status": "done",
+        "wait_seconds": 30.4716,
+        "duration_seconds": 0.9368,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q2319420:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q2319420",
+        "status": "done",
+        "wait_seconds": 20.5084,
+        "duration_seconds": 1.1427,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q309996:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q309996",
+        "status": "done",
+        "wait_seconds": 22.4509,
+        "duration_seconds": 0.9441,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q33252900:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q33252900",
+        "status": "done",
+        "wait_seconds": 39.3789,
+        "duration_seconds": 0.8126,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q4052939:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q4052939",
+        "status": "done",
+        "wait_seconds": 30.0213,
+        "duration_seconds": 0.4583,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q4267401:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q4267401",
+        "status": "done",
+        "wait_seconds": 18.9968,
+        "duration_seconds": 0.4675,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q522680:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q522680",
+        "status": "done",
+        "wait_seconds": 11.8648,
+        "duration_seconds": 1.0375,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q55637894:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q55637894",
+        "status": "done",
+        "wait_seconds": 10.9255,
+        "duration_seconds": 0.9456,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q6530643:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q6530643",
+        "status": "done",
+        "wait_seconds": 9.9908,
+        "duration_seconds": 0.9416,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q704757:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q704757",
+        "status": "done",
+        "wait_seconds": 8.8691,
+        "duration_seconds": 1.1261,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q94893:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q94893",
+        "status": "done",
+        "wait_seconds": 5.9245,
+        "duration_seconds": 0.9416,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q94912:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q94912",
+        "status": "done",
+        "wait_seconds": 6.8615,
+        "duration_seconds": 1.2166,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:entity:Q984061:full",
+        "task_type": "entity",
+        "app_id": null,
+        "entity_key": "Q984061",
+        "status": "done",
+        "wait_seconds": 8.0738,
+        "duration_seconds": 0.7995,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:game:app:1272320",
+        "task_type": "game",
+        "app_id": 1272320,
+        "entity_key": "app:1272320",
+        "status": "done",
+        "wait_seconds": 25.8594,
+        "duration_seconds": 1.3405,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:game:app:236390",
+        "task_type": "game",
+        "app_id": 236390,
+        "entity_key": "app:236390",
+        "status": "done",
+        "wait_seconds": 10.1478,
+        "duration_seconds": 9.3267,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:game:app:271590",
+        "task_type": "game",
+        "app_id": 271590,
+        "entity_key": "app:271590",
+        "status": "done",
+        "wait_seconds": 24.9452,
+        "duration_seconds": 15.7123,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:game:app:292030",
+        "task_type": "game",
+        "app_id": 292030,
+        "entity_key": "app:292030",
+        "status": "done",
+        "wait_seconds": 0.4452,
+        "duration_seconds": 7.9208,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:game:app:294100",
+        "task_type": "game",
+        "app_id": 294100,
+        "entity_key": "app:294100",
+        "status": "done",
+        "wait_seconds": 6.7558,
+        "duration_seconds": 5.387,
+        "subscribers": [],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:cd projekt red",
+        "task_type": "organization_name",
+        "app_id": 292030,
+        "entity_key": "name:cd projekt red",
+        "status": "done",
+        "wait_seconds": 8.366,
+        "duration_seconds": 1.6873,
+        "subscribers": [
+          {
+            "app_id": 292030,
+            "relation": "developer"
+          },
+          {
+            "app_id": 292030,
+            "relation": "publisher"
+          }
+        ],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:door 407",
+        "task_type": "organization_name",
+        "app_id": 1272320,
+        "entity_key": "name:door 407",
+        "status": "done",
+        "wait_seconds": 27.1998,
+        "duration_seconds": 0.9623,
+        "subscribers": [
+          {
+            "app_id": 1272320,
+            "relation": "developer"
+          },
+          {
+            "app_id": 1272320,
+            "relation": "publisher"
+          }
+        ],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:gaijin entertainment",
+        "task_type": "organization_name",
+        "app_id": 236390,
+        "entity_key": "name:gaijin entertainment",
+        "status": "done",
+        "wait_seconds": 19.4745,
+        "duration_seconds": 0.805,
+        "subscribers": [
+          {
+            "app_id": 236390,
+            "relation": "developer"
+          }
+        ],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:gaijin network ltd",
+        "task_type": "organization_name",
+        "app_id": 236390,
+        "entity_key": "name:gaijin network ltd",
+        "status": "done",
+        "wait_seconds": 20.2795,
+        "duration_seconds": 0.8376,
+        "subscribers": [
+          {
+            "app_id": 236390,
+            "relation": "publisher"
+          }
+        ],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:ludeon studios",
+        "task_type": "organization_name",
+        "app_id": 294100,
+        "entity_key": "name:ludeon studios",
+        "status": "done",
+        "wait_seconds": 12.1428,
+        "duration_seconds": 0.8519,
+        "subscribers": [
+          {
+            "app_id": 294100,
+            "relation": "developer"
+          },
+          {
+            "app_id": 294100,
+            "relation": "publisher"
+          }
+        ],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:rockstar games",
+        "task_type": "organization_name",
+        "app_id": 271590,
+        "entity_key": "name:rockstar games",
+        "status": "done",
+        "wait_seconds": 41.4268,
+        "duration_seconds": 0.8244,
+        "subscribers": [
+          {
+            "app_id": 271590,
+            "relation": "publisher"
+          }
+        ],
+        "error": null
+      },
+      {
+        "queue": "wikidata",
+        "task_key": "wikidata:organization-name:rockstar north",
+        "task_type": "organization_name",
+        "app_id": 271590,
+        "entity_key": "name:rockstar north",
+        "status": "done",
+        "wait_seconds": 40.6575,
+        "duration_seconds": 0.7693,
+        "subscribers": [
+          {
+            "app_id": 271590,
+            "relation": "developer"
+          }
+        ],
+        "error": null
+      }
+    ]
+  },
+  "http_metrics": {
+    "metacritic": {
+      "requests": 6,
+      "successful": 4,
+      "http_errors": 2,
+      "exceptions": 0,
+      "timing": {
+        "count": 6,
+        "total_seconds": 4.8741,
+        "avg_seconds": 0.8123,
+        "p95_seconds": 1.343
+      }
+    },
+    "pcgamingwiki": {
+      "requests": 15,
+      "successful": 10,
+      "http_errors": 5,
+      "exceptions": 0,
+      "timing": {
+        "count": 15,
+        "total_seconds": 3.7866,
+        "avg_seconds": 0.2524,
+        "p95_seconds": 0.6149
+      }
+    },
+    "steam": {
+      "requests": 35,
+      "successful": 35,
+      "http_errors": 0,
+      "exceptions": 0,
+      "timing": {
+        "count": 35,
+        "total_seconds": 30.5912,
+        "avg_seconds": 0.874,
+        "p95_seconds": 1.1919
+      }
+    },
+    "steamspy": {
+      "requests": 5,
+      "successful": 5,
+      "http_errors": 0,
+      "exceptions": 0,
+      "timing": {
+        "count": 5,
+        "total_seconds": 1.5032,
+        "avg_seconds": 0.3006,
+        "p95_seconds": 0.5873
+      }
+    },
+    "wikidata": {
+      "requests": 36,
+      "successful": 35,
+      "http_errors": 1,
+      "exceptions": 0,
+      "timing": {
+        "count": 36,
+        "total_seconds": 42.796,
+        "avg_seconds": 1.1888,
+        "p95_seconds": 8.0164
+      }
+    }
+  },
+  "validation": {
+    "ok": false,
+    "structural_ok": true,
+    "task_completeness_ok": true,
+    "source_execution_ok": false,
+    "structural_errors": [],
+    "missing_tasks": [],
+    "source_failures": [
+      "metacritic/271590/game: Metacritic lookup failed for 'Grand Theft Auto V Legacy'"
+    ],
+    "source_not_found": [
+      "hltb/271590/game"
+    ],
+    "facts_total": 5261,
+    "refreshes_total": 55,
+    "games_total": 5,
+    "app_reports": [
+      {
+        "app_id": 292030,
+        "facts_by_source": {
+          "steam": 894,
+          "wikidata": 0,
+          "steamspy": 28,
+          "pcgamingwiki": 81,
+          "hltb": 7,
+          "metacritic": 5
+        },
+        "refresh_statuses": {
+          "hltb": {
+            "game": "ready"
+          },
+          "metacritic": {
+            "game": "ready"
+          },
+          "pcgamingwiki": {
+            "game": "ready"
+          },
+          "steam": {
+            "achievements:en-US": "ready",
+            "details:en-US:kz": "ready",
+            "reviews:negative:4:1": "ready",
+            "rating:en-US:kz": "ready",
+            "rating:all:kz": "ready",
+            "reviews:positive:4:1": "ready",
+            "store:en-US:kz": "ready"
+          },
+          "steamspy": {
+            "stats": "ready"
+          }
+        },
+        "steam_developers_publishers_seen": [
+          "CD PROJEKT RED",
+          "CD PROJEKT RED"
+        ],
+        "wikidata_game_status": "ready",
+        "wikidata_item_qid": "Q4267401",
+        "wikidata_links": 11,
+        "organization_tasks_expected": 1,
+        "organization_tasks_present": 1,
+        "steam_scopes": [
+          "achievements:en-US",
+          "details:en-US:kz",
+          "rating:all:kz",
+          "rating:en-US:kz",
+          "reviews:negative:4:1",
+          "reviews:positive:4:1",
+          "store:en-US:kz"
+        ]
+      },
+      {
+        "app_id": 294100,
+        "facts_by_source": {
+          "steam": 679,
+          "wikidata": 0,
+          "steamspy": 28,
+          "pcgamingwiki": 47,
+          "hltb": 7,
+          "metacritic": 5
+        },
+        "refresh_statuses": {
+          "hltb": {
+            "game": "ready"
+          },
+          "metacritic": {
+            "game": "ready"
+          },
+          "pcgamingwiki": {
+            "game": "ready"
+          },
+          "steam": {
+            "achievements:en-US": "ready",
+            "details:en-US:kz": "ready",
+            "rating:all:kz": "ready",
+            "store:en-US:kz": "ready",
+            "reviews:positive:4:1": "ready",
+            "rating:en-US:kz": "ready",
+            "reviews:negative:4:1": "ready"
+          },
+          "steamspy": {
+            "stats": "ready"
+          }
+        },
+        "steam_developers_publishers_seen": [
+          "Ludeon Studios",
+          "Ludeon Studios"
+        ],
+        "wikidata_game_status": "ready",
+        "wikidata_item_qid": "Q19581568",
+        "wikidata_links": 5,
+        "organization_tasks_expected": 1,
+        "organization_tasks_present": 1,
+        "steam_scopes": [
+          "achievements:en-US",
+          "details:en-US:kz",
+          "rating:all:kz",
+          "rating:en-US:kz",
+          "reviews:negative:4:1",
+          "reviews:positive:4:1",
+          "store:en-US:kz"
+        ]
+      },
+      {
+        "app_id": 236390,
+        "facts_by_source": {
+          "steam": 1166,
+          "wikidata": 0,
+          "steamspy": 28,
+          "pcgamingwiki": 40,
+          "hltb": 7,
+          "metacritic": 5
+        },
+        "refresh_statuses": {
+          "hltb": {
+            "game": "ready"
+          },
+          "metacritic": {
+            "game": "ready"
+          },
+          "pcgamingwiki": {
+            "game": "ready"
+          },
+          "steam": {
+            "details:en-US:kz": "ready",
+            "reviews:positive:4:1": "ready",
+            "rating:all:kz": "ready",
+            "store:en-US:kz": "ready",
+            "rating:en-US:kz": "ready",
+            "reviews:negative:4:1": "ready",
+            "achievements:en-US": "ready"
+          },
+          "steamspy": {
+            "stats": "ready"
+          }
+        },
+        "steam_developers_publishers_seen": [
+          "Gaijin Entertainment",
+          "Gaijin Network Ltd"
+        ],
+        "wikidata_game_status": "ready",
+        "wikidata_item_qid": "Q4052939",
+        "wikidata_links": 4,
+        "organization_tasks_expected": 2,
+        "organization_tasks_present": 2,
+        "steam_scopes": [
+          "achievements:en-US",
+          "details:en-US:kz",
+          "rating:all:kz",
+          "rating:en-US:kz",
+          "reviews:negative:4:1",
+          "reviews:positive:4:1",
+          "store:en-US:kz"
+        ]
+      },
+      {
+        "app_id": 1272320,
+        "facts_by_source": {
+          "steam": 867,
+          "wikidata": 0,
+          "steamspy": 28,
+          "pcgamingwiki": 36,
+          "hltb": 7,
+          "metacritic": 5
+        },
+        "refresh_statuses": {
+          "hltb": {
+            "game": "ready"
+          },
+          "metacritic": {
+            "game": "ready"
+          },
+          "pcgamingwiki": {
+            "game": "ready"
+          },
+          "steam": {
+            "achievements:en-US": "ready",
+            "details:en-US:kz": "ready",
+            "reviews:positive:4:1": "ready",
+            "rating:all:kz": "ready",
+            "rating:en-US:kz": "ready",
+            "reviews:negative:4:1": "ready",
+            "store:en-US:kz": "ready"
+          },
+          "steamspy": {
+            "stats": "ready"
+          }
+        },
+        "steam_developers_publishers_seen": [
+          "Door 407",
+          "Door 407"
+        ],
+        "wikidata_game_status": "ready",
+        "wikidata_item_qid": "Q110856501",
+        "wikidata_links": 5,
+        "organization_tasks_expected": 1,
+        "organization_tasks_present": 1,
+        "steam_scopes": [
+          "achievements:en-US",
+          "details:en-US:kz",
+          "rating:all:kz",
+          "rating:en-US:kz",
+          "reviews:negative:4:1",
+          "reviews:positive:4:1",
+          "store:en-US:kz"
+        ]
+      },
+      {
+        "app_id": 271590,
+        "facts_by_source": {
+          "steam": 1179,
+          "wikidata": 0,
+          "steamspy": 28,
+          "pcgamingwiki": 84,
+          "hltb": 0,
+          "metacritic": 0
+        },
+        "refresh_statuses": {
+          "hltb": {
+            "game": "not_found"
+          },
+          "metacritic": {
+            "game": "failed"
+          },
+          "pcgamingwiki": {
+            "game": "ready"
+          },
+          "steam": {
+            "details:en-US:kz": "ready",
+            "achievements:en-US": "ready",
+            "reviews:negative:4:1": "ready",
+            "rating:en-US:kz": "ready",
+            "rating:all:kz": "ready",
+            "reviews:positive:4:1": "ready",
+            "store:en-US:kz": "ready"
+          },
+          "steamspy": {
+            "stats": "ready"
+          }
+        },
+        "steam_developers_publishers_seen": [
+          "Rockstar North",
+          "Rockstar Games"
+        ],
+        "wikidata_game_status": "ready",
+        "wikidata_item_qid": "Q14594724",
+        "wikidata_links": 11,
+        "organization_tasks_expected": 2,
+        "organization_tasks_present": 2,
+        "steam_scopes": [
+          "achievements:en-US",
+          "details:en-US:kz",
+          "rating:all:kz",
+          "rating:en-US:kz",
+          "reviews:negative:4:1",
+          "reviews:positive:4:1",
+          "store:en-US:kz"
+        ]
+      }
+    ],
+    "source_statuses": {
+      "hltb": {
+        "facts": 28,
+        "ready": 4,
+        "not_found": 1
+      },
+      "metacritic": {
+        "facts": 20,
+        "ready": 4,
+        "failed": 1
+      },
+      "pcgamingwiki": {
+        "facts": 288,
+        "ready": 5
+      },
+      "steam": {
+        "facts": 4785,
+        "ready": 35
+      },
+      "steamspy": {
+        "facts": 140,
+        "ready": 5
+      }
+    }
+  }
+}

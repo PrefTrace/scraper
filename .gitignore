@@ -153,10 +153,15 @@ activemq-data/
 .venv
 demo/*
 !demo/benchmark_wikidata.py
+!demo/benchmark_pipeline.py
 !demo/wikidata_benchmark.json
 !demo/wikidata.sqlite3
 !demo/wikidata_samples.md
 !demo/wikidata_tz_gap_report.md
+!demo/new_run/
+!demo/new_run/pipeline_benchmark.json
+!demo/new_run/pipeline_report.md
+!demo/new_run/pipeline.sqlite3
 env/
 venv/
 ENV/
