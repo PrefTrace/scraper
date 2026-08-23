@@ -13,7 +13,12 @@ from .orm import (
     WikidataNameLookupResult,
     WikidataQualifier,
 )
-from .sync import WikidataSyncError, WikidataSyncService
+from .sync import (
+    WikidataGameResult,
+    WikidataOrganizationNameResult,
+    WikidataSyncError,
+    WikidataSyncService,
+)
 
 __all__ = [
     "ScraperConfig",
@@ -22,8 +27,10 @@ __all__ = [
     "WikidataFact",
     "WikidataGame",
     "WikidataGameLink",
+    "WikidataGameResult",
     "WikidataNameLookup",
     "WikidataNameLookupResult",
+    "WikidataOrganizationNameResult",
     "WikidataQualifier",
     "ScraperDatabase",
     "SourceDiagnostic",

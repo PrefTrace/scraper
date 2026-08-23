@@ -31,6 +31,7 @@ class SteamRefreshResult:
     """Current Steam refresh states plus people named by Steam."""
 
     refreshes: list[SourceRefresh]
+    title: str | None
     developers: list[str]
     publishers: list[str]
 
@@ -191,9 +192,10 @@ class SteamGameSyncService(CachedSourceService):
                 )
             )
             refreshes = list(await asyncio.gather(*operations))
-            developers, publishers = await self._read_people(app_id, detail_scopes)
+            title, developers, publishers = await self._read_people(app_id, detail_scopes)
             return SteamRefreshResult(
                 refreshes=refreshes,
+                title=title,
                 developers=developers,
                 publishers=publishers,
             )
@@ -220,7 +222,7 @@ class SteamGameSyncService(CachedSourceService):
         self,
         app_id: int,
         detail_scopes: Sequence[str],
-    ) -> tuple[list[str], list[str]]:
+    ) -> tuple[str | None, list[str], list[str]]:
         """Read the current developer/publisher facts after all scopes finish."""
 
         async with self.database.session() as session:
@@ -234,16 +236,19 @@ class SteamGameSyncService(CachedSourceService):
                 )
             ).all()
 
+        title: str | None = None
         developers: list[str] = []
         publishers: list[str] = []
         for fact in facts:
             if fact.value_type != "text" or not fact.value_text:
                 continue
-            if fact.path.startswith("developers["):
+            if fact.path == "localized.name" and title is None:
+                title = fact.value_text
+            elif fact.path.startswith("developers["):
                 _append_unique(developers, fact.value_text)
             elif fact.path.startswith("publishers["):
                 _append_unique(publishers, fact.value_text)
-        return developers, publishers
+        return title, developers, publishers
 
 
 def _append_unique(values: list[str], value: str) -> None:

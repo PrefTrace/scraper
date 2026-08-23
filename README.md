@@ -29,18 +29,23 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## ORM-сервисы
+## Pipeline и очереди
 
-Внутри приложения pipeline сам создаёт задачи. Субмодуль задачу не создаёт и
-не оборачивает вызов синхронной функцией:
+В первой версии feeder читает AppID из файла, указанного в
+`SCRAPER_APPIDS_FILE`. Очереди находятся в памяти процесса. Для каждого
+источника запускается один асинхронный worker. Сами source-сервисы задачи не
+создают: после завершения Steam pipeline регистрирует независимые задачи
+Wikidata для игры, разработчиков и паблишеров.
 
 ```python
 import asyncio
 
 from scraper import (
+    PipelineServices,
     PCGamingWikiSyncService,
     ScraperConfig,
     ScraperDatabase,
+    ScraperPipeline,
     SteamGameSyncService,
     SteamSpySyncService,
     WikidataSyncService,
@@ -48,25 +53,21 @@ from scraper import (
 
 
 async def main() -> None:
-    database = ScraperDatabase(ScraperConfig.from_env())
+    config = ScraperConfig.from_env()
+    if config.app_ids_file is None:
+        raise RuntimeError("SCRAPER_APPIDS_FILE is required")
+    database = ScraperDatabase(config)
     try:
-        wikidata = WikidataSyncService(database)
-        pcgw = PCGamingWikiSyncService(database)
-        steam = SteamGameSyncService(database)
-        steamspy = SteamSpySyncService(database)
-
-        steam_result = await asyncio.create_task(steam.refresh(620))
-        await asyncio.gather(
-            asyncio.create_task(
-                wikidata.refresh_game(
-                    620,
-                    developers=steam_result.developers,
-                    publishers=steam_result.publishers,
-                )
-            ),
-            asyncio.create_task(pcgw.refresh(620)),
-            asyncio.create_task(steamspy.refresh(620)),
+        pipeline = ScraperPipeline(
+            PipelineServices(
+                steam=SteamGameSyncService(database),
+                wikidata=WikidataSyncService(database),
+                pcgamingwiki=PCGamingWikiSyncService(database),
+                steamspy=SteamSpySyncService(database),
+            )
         )
+        # Для тестового запуска используется ограниченный префикс файла.
+        await pipeline.run_from_file(config.app_ids_file, limit=10)
     finally:
         await database.dispose()
 
@@ -75,16 +76,17 @@ asyncio.run(main())
 ```
 
 `WikidataSyncService`, `SteamGameSyncService`, `HltbSyncService`,
-`MetacriticSyncService`, `PCGamingWikiSyncService` и `SteamSpySyncService` используют один общий
-TTL-кеш в базе. Повторный вызов свежего scope не обращается к внешнему
-источнику. Блокировки на AppID/scope защищают от дублирования запросов при
-конкурентных задачах.
+`MetacriticSyncService`, `PCGamingWikiSyncService` и `SteamSpySyncService`
+используют один общий TTL-кеш в базе. Очередь хранит только текущие задачи в
+памяти; факты, TTL и результаты source-сервисов сохраняются в ORM.
 
 Steam является первичным источником для цепочки обогащения. Результат
-`SteamGameSyncService.refresh()` содержит текущие списки `developers` и
-`publishers`; pipeline передаёт их в `WikidataSyncService.refresh_game()`.
-Если Wikidata не находит игру по AppID, сервис всё равно ищет организации по
-этим именам, кеширует поиск по TTL и связывает найденные Q-ID с AppID игры.
+`SteamGameSyncService.refresh()` возвращает текущие списки `developers` и
+`publishers`; pipeline одновременно ставит в очередь задачу Wikidata-игры и
+отдельные задачи поиска организаций по каждому имени. Если Wikidata не
+находит игру по AppID, отдельные задачи организаций всё равно выполняются.
+Поиск имени кешируется по TTL, а полная загрузка каждой найденной Q-сущности
+идёт отдельной задачей.
 
 ## Wikidata
 
@@ -134,6 +136,7 @@ Steam-методом.
 
 ```text
 SCRAPER_DATABASE_URL=sqlite+aiosqlite:///./scraper.sqlite3
+SCRAPER_APPIDS_FILE=./appids.txt
 SCRAPER_TTL_SECONDS=2592000
 SCRAPER_CONCURRENCY=32
 SCRAPER_BATCH_SIZE=50

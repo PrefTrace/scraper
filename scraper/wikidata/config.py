@@ -15,6 +15,7 @@ class ScraperConfig:
     """Runtime configuration for all ORM-backed source synchronizers."""
 
     database_url: str = DEFAULT_DATABASE_URL
+    app_ids_file: str | None = None
     ttl_seconds: int = DEFAULT_TTL_SECONDS
     concurrency: int = 32
     batch_size: int = 50
@@ -28,6 +29,7 @@ class ScraperConfig:
     def from_env(cls) -> ScraperConfig:
         config = cls(
             database_url=_env_value("SCRAPER_DATABASE_URL", DEFAULT_DATABASE_URL),
+            app_ids_file=os.getenv("SCRAPER_APPIDS_FILE"),
             ttl_seconds=_env_int("SCRAPER_TTL_SECONDS", DEFAULT_TTL_SECONDS),
             concurrency=_env_int("SCRAPER_CONCURRENCY", 32),
             batch_size=_env_int("SCRAPER_BATCH_SIZE", 50),

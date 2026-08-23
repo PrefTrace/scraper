@@ -72,7 +72,7 @@ async def run(app_ids: list[int], output_dir: Path) -> dict[str, object]:
                 event_hooks={"request": [count_request]},
             ) as http:
                 try:
-                    game = await service.refresh_game(app_id, client=http)
+                    game = await service.refresh_game_task(app_id, client=http)
                 except Exception as exc:  # pragma: no cover - demo diagnostics
                     game = None
                     error = f"{type(exc).__name__}: {exc}"

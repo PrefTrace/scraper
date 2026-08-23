@@ -65,13 +65,14 @@ ORM-модель нормализована по фактам:
 ```python
 import asyncio
 
-task = asyncio.create_task(service.refresh_game(620))
+task = asyncio.create_task(service.refresh_game_task(620))
 game = await task
 ```
 
 Source-сервис не создаёт task сам: это ответственность pipeline приложения.
-Такой же async refresh-контракт добавлен для Steam, HLTB, Metacritic и
-PCGamingWiki. Pipeline приложения создаёт `asyncio.create_task()` напрямую.
+После Steam pipeline регистрирует отдельные Wikidata-задачи для игры,
+разработчиков, паблишеров и найденных Q-ID сущностей. В текущей версии worker
+очереди один на источник, а очередь живёт в памяти.
 
 Сервис блокирует параллельные refresh одной игры, но допускает конкурентную
 загрузку разных batch-ей сущностей через semaphore. Настройки берутся из env:

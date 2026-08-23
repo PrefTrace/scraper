@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -45,34 +46,26 @@ _FULL_GAME_PROPERTIES = {
     "P767",
     "P725",
 }
-_FULL_ORGANIZATION_PROPERTIES = {
-    "P749",
-    "P355",
-    "P7888",
-    "P1365",
-    "P1366",
-    "P112",
-    "P169",
-    "P488",
-    "P1454",
-    "P17",
-    "P740",
-    "P159",
-    "P495",
-    "P11812",
-}
-_ORGANIZATION_TYPE_IDS = {
-    "Q43229",
-    "Q4830453",
-    "Q783794",
-    "Q6881511",
-    "Q16334295",
-    "Q15617994",
-}
-
-
 class WikidataSyncError(RuntimeError):
     """Raised when an ORM refresh cannot be completed."""
+
+
+@dataclass(frozen=True, slots=True)
+class WikidataGameResult:
+    """Result of the single-game Wikidata queue task."""
+
+    app_id: int
+    item_qid: str | None
+    status: str
+    links: dict[str, set[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class WikidataOrganizationNameResult:
+    """Result of a name-resolution task; full entity loading is separate."""
+
+    name: str
+    qids: list[str]
 
 
 class WikidataSyncService:
@@ -103,16 +96,14 @@ class WikidataSyncService:
                 await self.database.create_schema()
                 self._schema_ready = True
 
-    async def refresh_game(
+    async def refresh_game_task(
         self,
         app_id: int,
         *,
-        developers: Sequence[str] = (),
-        publishers: Sequence[str] = (),
         force: bool = False,
         client: httpx.AsyncClient | None = None,
-    ) -> WikidataGame | None:
-        """Refresh a Steam game and its Wikidata sub-entities into the ORM."""
+    ) -> WikidataGameResult:
+        """Refresh only the game entity; related entities become new tasks."""
 
         if app_id < 0:
             raise ValueError("Steam AppID cannot be negative")
@@ -120,13 +111,7 @@ class WikidataSyncService:
         lock = self._app_locks.setdefault(app_id, asyncio.Lock())
         async with lock:
             if client is not None:
-                return await self._refresh_with_client(
-                    client,
-                    app_id,
-                    developers=developers,
-                    publishers=publishers,
-                    force=force,
-                )
+                return await self._refresh_game_task_with_client(client, app_id, force=force)
             timeout = httpx.Timeout(
                 self.config.request_timeout_seconds,
                 connect=self.config.connect_timeout_seconds,
@@ -135,125 +120,184 @@ class WikidataSyncService:
                 max_connections=self.config.concurrency,
                 max_keepalive_connections=max(2, self.config.concurrency // 2),
             )
-            headers = {
-                "User-Agent": self.config.user_agent,
-                "Accept-Language": "en,ru;q=0.8",
-            }
             async with httpx.AsyncClient(
                 timeout=timeout,
                 limits=limits,
-                headers=headers,
+                headers={
+                    "User-Agent": self.config.user_agent,
+                    "Accept-Language": "en,ru;q=0.8",
+                },
                 follow_redirects=True,
             ) as http:
-                return await self._refresh_with_client(
-                    http,
-                    app_id,
-                    developers=developers,
-                    publishers=publishers,
-                    force=force,
-                )
+                return await self._refresh_game_task_with_client(http, app_id, force=force)
 
-    async def _refresh_with_client(
+    async def _refresh_game_task_with_client(
         self,
         http: httpx.AsyncClient,
         app_id: int,
         *,
-        developers: Sequence[str],
-        publishers: Sequence[str],
         force: bool,
-    ) -> WikidataGame | None:
-        wikidata = WikidataClient(http, user_agent=self.config.user_agent)
+    ) -> WikidataGameResult:
+        client = WikidataClient(http, user_agent=self.config.user_agent)
         now = utcnow()
         game = await self._get_game(app_id)
-        root_qid = game.item_qid if game is not None else None
         lookup_fresh = (
             not force
             and game is not None
             and game.lookup_at is not None
             and game.lookup_at >= self._cutoff(now)
         )
+        root_qid = game.item_qid if lookup_fresh and game is not None else None
         if not lookup_fresh:
-            item_ids = await wikidata.find_by_steam_app_id(app_id)
-            if not item_ids:
-                root_qid = None
-            else:
-                root_qid = item_ids[0]
+            item_ids = await client.find_by_steam_app_id(app_id)
+            root_qid = item_ids[0] if item_ids else None
 
         if root_qid is None:
-            name_links = await self._resolve_steam_organizations(
-                wikidata,
-                developers=developers,
-                publishers=publishers,
-                force=force,
-            )
-            return await self._save_game(
+            await self._save_game(
                 app_id,
                 None,
                 lookup_at=now,
                 refreshed_at=None,
-                links=name_links,
+                links={},
                 status="not_found",
                 last_error="No Wikidata item mapped to Steam AppID",
             )
+            return WikidataGameResult(app_id, None, "not_found", {})
 
         await self._ensure_entities(
-            wikidata,
+            client,
             {root_qid},
             full_ids={root_qid},
             force=force,
         )
-        root_linked_ids = await self._linked_item_ids({root_qid})
-        full_ids = await self._full_game_ids(root_qid)
-        await self._ensure_entities(
-            wikidata,
-            root_linked_ids | full_ids,
-            full_ids=full_ids,
-            force=force,
-        )
-
-        organization_ids = await self._item_ids_for_properties(
-            full_ids,
-            _FULL_ORGANIZATION_PROPERTIES,
-        )
-        organization_linked_ids = await self._linked_item_ids(organization_ids)
-        organization_full_ids = organization_ids | organization_linked_ids
-        await self._ensure_entities(
-            wikidata,
-            organization_linked_ids | organization_full_ids,
-            full_ids=organization_full_ids,
-            force=force,
-        )
-
-        all_subject_ids = {root_qid} | full_ids | organization_full_ids
-        property_ids = await self._property_ids_for_subjects(all_subject_ids)
-        await self._ensure_entities(
-            wikidata,
-            {property_id for property_id in property_ids if property_id.startswith("P")},
-            full_ids={property_id for property_id in property_ids if property_id.startswith("P")},
-            force=force,
-        )
-        name_links = await self._resolve_steam_organizations(
-            wikidata,
-            developers=developers,
-            publishers=publishers,
-            force=force,
-        )
-        links = self._build_links(
-            app_id,
-            root_qid,
-            root_linked_ids | full_ids | organization_linked_ids | organization_full_ids,
-            full_ids,
-            organization_full_ids,
-        )
-        for relation, qids in name_links.items():
-            links.setdefault(relation, set()).update(qids)
-        return await self._save_game(
+        developer_ids = await self._item_ids_for_properties({root_qid}, {"P178"})
+        publisher_ids = await self._item_ids_for_properties({root_qid}, {"P123"})
+        related_ids = await self._full_game_ids(root_qid)
+        links = {
+            "root": {root_qid},
+            "wikidata_developer": developer_ids,
+            "wikidata_publisher": publisher_ids,
+            "related": related_ids - developer_ids - publisher_ids - {root_qid},
+        }
+        await self._save_game(
             app_id,
             root_qid,
             lookup_at=now,
             refreshed_at=utcnow(),
             links=links,
         )
+        return WikidataGameResult(app_id, root_qid, "ready", links)
+
+    async def refresh_organization_name(
+        self,
+        name: str,
+        *,
+        force: bool = False,
+        client: httpx.AsyncClient | None = None,
+    ) -> WikidataOrganizationNameResult:
+        """Resolve one organization name without loading its full entity."""
+
+        if not name.strip():
+            return WikidataOrganizationNameResult(name, [])
+        await self.ensure_schema()
+        if client is not None:
+            wikidata = WikidataClient(client, user_agent=self.config.user_agent)
+            qids = await self._resolve_name(wikidata, name, force=force)
+            return WikidataOrganizationNameResult(name, qids)
+        timeout = httpx.Timeout(
+            self.config.request_timeout_seconds,
+            connect=self.config.connect_timeout_seconds,
+        )
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            headers={"User-Agent": self.config.user_agent},
+            follow_redirects=True,
+        ) as http:
+            wikidata = WikidataClient(http, user_agent=self.config.user_agent)
+            qids = await self._resolve_name(wikidata, name, force=force)
+            return WikidataOrganizationNameResult(name, qids)
+
+    async def refresh_entity(
+        self,
+        qid: str,
+        *,
+        force: bool = False,
+        client: httpx.AsyncClient | None = None,
+    ) -> WikidataEntity | None:
+        """Refresh exactly one Wikidata entity."""
+
+        if not qid.startswith(("Q", "P")):
+            raise ValueError(f"Invalid Wikidata entity ID: {qid}")
+        await self.ensure_schema()
+        if client is not None:
+            wikidata = WikidataClient(client, user_agent=self.config.user_agent)
+            await self._ensure_entities(
+                wikidata,
+                {qid},
+                full_ids={qid},
+                force=force,
+            )
+        else:
+            timeout = httpx.Timeout(
+                self.config.request_timeout_seconds,
+                connect=self.config.connect_timeout_seconds,
+            )
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                headers={"User-Agent": self.config.user_agent},
+                follow_redirects=True,
+            ) as http:
+                wikidata = WikidataClient(http, user_agent=self.config.user_agent)
+                await self._ensure_entities(
+                    wikidata,
+                    {qid},
+                    full_ids={qid},
+                    force=force,
+                )
+        async with self.database.session() as session:
+            return await session.get(WikidataEntity, qid)
+
+    async def link_game_entity(self, app_id: int, qid: str, *, relation: str) -> None:
+        """Persist one current game-to-entity relation."""
+
+        await self.ensure_schema()
+        async with self._database_write_lock:
+            async with self.database.session() as session:
+                game = await session.get(WikidataGame, app_id)
+                if game is None:
+                    game = WikidataGame(
+                        steam_app_id=app_id,
+                        item_qid=None,
+                        status="pending",
+                    )
+                    session.add(game)
+                    await session.flush()
+                entity = await session.get(WikidataEntity, qid)
+                if entity is None:
+                    session.add(
+                        WikidataEntity(
+                            qid=qid,
+                            entity_kind="property" if qid.startswith("P") else "item",
+                        )
+                    )
+                    await session.flush()
+                existing = await session.scalar(
+                    select(WikidataGameLink).where(
+                        WikidataGameLink.steam_app_id == app_id,
+                        WikidataGameLink.qid == qid,
+                        WikidataGameLink.relation == relation,
+                    )
+                )
+                if existing is None:
+                    session.add(
+                        WikidataGameLink(
+                            steam_app_id=app_id,
+                            qid=qid,
+                            relation=relation,
+                            observed_at=utcnow(),
+                        )
+                    )
+                await session.commit()
 
     async def _ensure_entities(
         self,
@@ -341,21 +385,6 @@ class WikidataSyncService:
     async def _full_game_ids(self, root_qid: str) -> set[str]:
         return await self._item_ids_for_properties({root_qid}, _FULL_GAME_PROPERTIES)
 
-    async def _linked_item_ids(self, subject_ids: set[str]) -> set[str]:
-        if not subject_ids:
-            return set()
-        async with self.database.session() as session:
-            values = (
-                await session.scalars(
-                    select(WikidataFact.value_qid).where(
-                        WikidataFact.subject_qid.in_(subject_ids),
-                        WikidataFact.value_type == "item",
-                        WikidataFact.value_qid.is_not(None),
-                    )
-                )
-            ).all()
-        return {value for value in values if value is not None}
-
     async def _item_ids_for_properties(
         self,
         subject_ids: set[str],
@@ -375,42 +404,6 @@ class WikidataSyncService:
                 )
             ).all()
         return {value for value in values if value is not None}
-
-    async def _property_ids_for_subjects(self, subject_ids: set[str]) -> set[str]:
-        async with self.database.session() as session:
-            values = (
-                await session.scalars(
-                    select(WikidataFact.property_id).where(
-                        WikidataFact.subject_qid.in_(subject_ids)
-                    )
-                )
-            ).all()
-        return set(values)
-
-    async def _resolve_steam_organizations(
-        self,
-        client: WikidataClient,
-        *,
-        developers: Sequence[str],
-        publishers: Sequence[str],
-        force: bool,
-    ) -> dict[str, set[str]]:
-        links: dict[str, set[str]] = {}
-        for relation, names in (
-            ("developer", developers),
-            ("publisher", publishers),
-        ):
-            for name in _unique_names(names):
-                qids = await self._resolve_name(client, name, force=force)
-                await self._ensure_entities(
-                    client,
-                    qids,
-                    full_ids=set(qids),
-                    force=force,
-                )
-                if qids:
-                    links.setdefault(relation, set()).update(qids)
-        return links
 
     async def _resolve_name(
         self,
@@ -446,12 +439,6 @@ class WikidataSyncService:
             # wbsearchentities returns ranked candidates. Keep the best current
             # candidate only; the lookup itself is refreshed as one current fact.
             candidates = list(dict.fromkeys(candidates[:1]))
-            await self._ensure_entities(
-                client,
-                candidates,
-                full_ids=set(candidates),
-                force=force,
-            )
 
             observed_at = utcnow()
             async with self._database_write_lock:
@@ -472,18 +459,15 @@ class WikidataSyncService:
                             WikidataNameLookupResult.normalized_name == normalized_name
                         )
                     )
-                    persisted_candidates: list[str] = []
                     for qid in candidates:
-                        if await session.get(WikidataEntity, qid) is not None:
-                            persisted_candidates.append(qid)
-                            session.add(
-                                WikidataNameLookupResult(
-                                    normalized_name=normalized_name,
-                                    qid=qid,
-                                )
+                        session.add(
+                            WikidataNameLookupResult(
+                                normalized_name=normalized_name,
+                                qid=qid,
                             )
+                        )
                     await session.commit()
-            return persisted_candidates
+            return candidates
 
     async def _get_game(self, app_id: int) -> WikidataGame | None:
         async with self.database.session() as session:
@@ -512,11 +496,32 @@ class WikidataSyncService:
             game.status = status
             game.last_error = last_error
             await session.flush()
+            relations_to_replace = {
+                "root",
+                "linked",
+                "full",
+                "organization",
+                "related",
+                "wikidata_developer",
+                "wikidata_publisher",
+            } | set(links)
             await session.execute(
-                delete(WikidataGameLink).where(WikidataGameLink.steam_app_id == app_id)
+                delete(WikidataGameLink).where(
+                    WikidataGameLink.steam_app_id == app_id,
+                    WikidataGameLink.relation.in_(relations_to_replace),
+                )
             )
             for relation, qids in links.items():
                 for qid in qids:
+                    entity = await session.get(WikidataEntity, qid)
+                    if entity is None:
+                        session.add(
+                            WikidataEntity(
+                                qid=qid,
+                                entity_kind="property" if qid.startswith("P") else "item",
+                            )
+                        )
+                        await session.flush()
                     session.add(
                         WikidataGameLink(
                             steam_app_id=app_id,
@@ -530,23 +535,6 @@ class WikidataSyncService:
 
     def _cutoff(self, now: datetime) -> datetime:
         return now - timedelta(seconds=self.config.ttl_seconds)
-
-    @staticmethod
-    def _build_links(
-        app_id: int,
-        root_qid: str,
-        linked_ids: set[str],
-        full_ids: set[str],
-        organization_ids: set[str],
-    ) -> dict[str, set[str]]:
-        del app_id
-        return {
-            "root": {root_qid},
-            "linked": linked_ids - {root_qid},
-            "full": full_ids - {root_qid},
-            "organization": organization_ids,
-        }
-
 
 async def _save_entity_payload(
     session: AsyncSession,
@@ -753,18 +741,9 @@ def _normalize_name(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def _unique_names(values: Sequence[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = _normalize_name(value)
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            result.append(value.strip())
-    return result
-
-
 __all__ = [
+    "WikidataGameResult",
+    "WikidataOrganizationNameResult",
     "WikidataSyncError",
     "WikidataSyncService",
 ]

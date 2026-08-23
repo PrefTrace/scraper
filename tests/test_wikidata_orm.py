@@ -267,21 +267,17 @@ async def test_missing_game_still_resolves_steam_organizations(monkeypatch, tmp_
                 }
 
         monkeypatch.setattr("scraper.wikidata.sync.WikidataClient", FakeWikidataClient)
-        first = await service.refresh_game(
-            42,
-            developers=["Dev"],
-            publishers=["Pub"],
-            client=object(),
-        )
-        second = await service.refresh_game(
-            42,
-            developers=["Dev"],
-            publishers=["Pub"],
-            client=object(),
-        )
+        first = await service.refresh_game_task(42, client=object())
+        dev = await service.refresh_organization_name("Dev", client=object())
+        pub = await service.refresh_organization_name("Pub", client=object())
+        await service.link_game_entity(42, dev.qids[0], relation="developer")
+        await service.link_game_entity(42, pub.qids[0], relation="publisher")
+        await service.refresh_entity(dev.qids[0], client=object())
+        await service.refresh_entity(pub.qids[0], client=object())
+        second = await service.refresh_game_task(42, client=object())
 
-        assert first is not None and first.status == "not_found"
-        assert second is not None and second.status == "not_found"
+        assert first.status == "not_found"
+        assert second.status == "not_found"
         assert first.item_qid is None
         assert FakeWikidataClient.search_calls == 2
         async with database.session() as session:

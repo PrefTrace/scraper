@@ -150,7 +150,7 @@ class WikidataNameLookupResult(Base):
         index=True,
     )
     qid: Mapped[str] = mapped_column(
-        ForeignKey("wikidata_entities.qid"),
+        String(32),
         index=True,
     )
 
