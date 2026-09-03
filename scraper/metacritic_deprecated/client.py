@@ -59,14 +59,8 @@ def _metacritic_urls(title: str, steam_url: str | None) -> list[str]:
 
 def parse_metacritic_html(html: str, url: str) -> MetacriticData:
     parser = HTMLParser(html)
-    values = [
-        _node_text(node)
-        for node in parser.css('span[data-testid="global-score-value"]')
-    ]
-    headers = [
-        _node_text(node)
-        for node in parser.css('div[data-testid="global-score-header"]')
-    ]
+    values = [_node_text(node) for node in parser.css('span[data-testid="global-score-value"]')]
+    headers = [_node_text(node) for node in parser.css('div[data-testid="global-score-header"]')]
 
     critic_score: int | None = None
     user_score: float | None = None

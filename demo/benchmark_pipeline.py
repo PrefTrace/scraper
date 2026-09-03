@@ -20,20 +20,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scraper.pipeline import AppIdFileFeeder, PipelineServices, ScraperPipeline  # noqa: E402
 from scraper.pipeline.models import (  # noqa: E402
-    QUEUE_HLTB,
-    QUEUE_METACRITIC,
-    QUEUE_PCGAMINGWIKI,
     QUEUE_STEAM,
-    QUEUE_STEAMSPY,
     QUEUE_WIKIDATA,
 )
 from scraper.sources import (  # noqa: E402
-    HltbSyncService,
-    MetacriticSyncService,
-    PCGamingWikiSyncService,
     SteamGameSyncService,
-    SteamSpySyncService,
 )
+from scraper.steam.orm import SteamApp, SteamOrganizationCredit  # noqa: E402
 from scraper.wikidata import (  # noqa: E402
     ScraperConfig,
     ScraperDatabase,
@@ -49,10 +42,6 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "demo" / "new_run"
 CHANNELS = (
     QUEUE_STEAM,
     QUEUE_WIKIDATA,
-    QUEUE_STEAMSPY,
-    QUEUE_PCGAMINGWIKI,
-    QUEUE_HLTB,
-    QUEUE_METACRITIC,
 )
 
 
@@ -83,20 +72,10 @@ class HttpChannelMetrics:
 def _channel_for_url(url: object) -> str:
     host = httpx.URL(str(url)).host or "unknown"
     host = host.casefold()
-    if "steamspy" in host:
-        return QUEUE_STEAMSPY
     if "steam" in host:
         return QUEUE_STEAM
     if "wikidata" in host or "wikimedia" in host:
         return QUEUE_WIKIDATA
-    if "steamspy" in host:
-        return QUEUE_STEAMSPY
-    if "pcgamingwiki" in host:
-        return QUEUE_PCGAMINGWIKI
-    if "howlongtobeat" in host:
-        return QUEUE_HLTB
-    if "metacritic" in host:
-        return QUEUE_METACRITIC
     return "unknown"
 
 
@@ -215,7 +194,6 @@ async def _validate_database(
     state_keys = {(state.task.queue, state.task.task_key) for state in task_states}
     app_reports: list[dict[str, object]] = []
     invalid_facts: list[str] = []
-    invalid_steamspy: list[str] = []
     missing_tasks: list[str] = []
     statuses_by_source: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
@@ -223,9 +201,14 @@ async def _validate_database(
         all_facts = list((await session.scalars(select(SourceFact))).all())
         all_refreshes = list((await session.scalars(select(SourceRefresh))).all())
         all_games = {
-            game.steam_app_id: game
-            for game in (await session.scalars(select(WikidataGame))).all()
+            game.steam_app_id: game for game in (await session.scalars(select(WikidataGame))).all()
         }
+        steam_apps = {
+            app.app_id: app for app in (await session.scalars(select(SteamApp))).all()
+        }
+        steam_organizations = list(
+            (await session.scalars(select(SteamOrganizationCredit))).all()
+        )
         link_count_by_app: dict[int, int] = defaultdict(int)
         for link in (await session.scalars(select(WikidataGameLink))).all():
             link_count_by_app[link.steam_app_id] += 1
@@ -278,6 +261,15 @@ async def _validate_database(
             )
         statuses_by_source[fact.source]["facts"] += 1
 
+    steam_organizations_by_app: dict[int, list[SteamOrganizationCredit]] = defaultdict(list)
+    steam_rows_by_app: dict[int, int] = defaultdict(int)
+    for app in steam_apps.values():
+        steam_rows_by_app[app.app_id] += 1
+    for organization in steam_organizations:
+        steam_organizations_by_app[organization.app_id].append(organization)
+        steam_rows_by_app[organization.app_id] += 1
+    statuses_by_source[QUEUE_STEAM]["facts"] += sum(steam_rows_by_app.values())
+
     refreshes_by_app: dict[int, list[SourceRefresh]] = defaultdict(list)
     for refresh in all_refreshes:
         refreshes_by_app[refresh.steam_app_id].append(refresh)
@@ -292,20 +284,14 @@ async def _validate_database(
             source_scopes[refresh.source].append(refresh.scope)
             source_statuses[refresh.source][refresh.scope] = refresh.status
 
-        steam_facts = [fact for fact in facts if fact.source == QUEUE_STEAM]
-        steam_names = [
-            str(_fact_value(fact))
-            for fact in steam_facts
-            if fact.path.startswith("developers[") or fact.path.startswith("publishers[")
-        ]
+        steam_organizations = steam_organizations_by_app[app_id]
+        steam_names = [organization.organization_name for organization in steam_organizations]
         org_expectations: list[str] = []
-        for fact in steam_facts:
-            if not fact.path.startswith(("developers[", "publishers[")):
+        for organization in steam_organizations:
+            name = organization.organization_name
+            if not name.strip():
                 continue
-            name = _fact_value(fact)
-            if not isinstance(name, str) or not name.strip():
-                continue
-            relation = "developer" if fact.path.startswith("developers[") else "publisher"
+            relation = organization.status
             task_key = f"wikidata:organization-name:{_normalize_name(name)}"
             org_expectations.append(task_key)
             if (QUEUE_WIKIDATA, task_key) not in state_keys:
@@ -314,40 +300,10 @@ async def _validate_database(
         expected_tasks = [
             (QUEUE_STEAM, f"steam:game:{app_id}"),
             (QUEUE_WIKIDATA, f"wikidata:game:app:{app_id}"),
-            (QUEUE_STEAMSPY, f"steamspy:game:{app_id}"),
-            (QUEUE_PCGAMINGWIKI, f"pcgamingwiki:game:{app_id}"),
-            (QUEUE_HLTB, f"hltb:game:{app_id}"),
-            (QUEUE_METACRITIC, f"metacritic:game:{app_id}"),
         ]
         for queue, task_key in expected_tasks:
             if (queue, task_key) not in state_keys:
                 missing_tasks.append(f"{app_id}: missing {queue} task")
-
-        spy_facts = {
-            fact.path: fact.value_int
-            for fact in facts
-            if fact.source == QUEUE_STEAMSPY and fact.value_type == "int"
-        }
-        owners_min = spy_facts.get("owners_min")
-        owners_max = spy_facts.get("owners_max")
-        if owners_min is not None and owners_min < 0:
-            invalid_steamspy.append(f"{app_id}: owners_min < 0")
-        if owners_max is not None and owners_max < 0:
-            invalid_steamspy.append(f"{app_id}: owners_max < 0")
-        if owners_min is not None and owners_max is not None and owners_min > owners_max:
-            invalid_steamspy.append(f"{app_id}: owners_min > owners_max")
-        for path, value in spy_facts.items():
-            if (
-                path in {
-                    "average_forever_minutes",
-                    "average_two_weeks_minutes",
-                    "median_forever_minutes",
-                    "median_two_weeks_minutes",
-                    "ccu",
-                }
-                or path.startswith("tags.")
-            ) and value is not None and value < 0:
-                invalid_steamspy.append(f"{app_id}: {path} < 0")
 
         game = all_games.get(app_id)
         game_status = game.status if game is not None else "missing"
@@ -365,12 +321,11 @@ async def _validate_database(
             {
                 "app_id": app_id,
                 "facts_by_source": {
-                    source: sum(1 for fact in facts if fact.source == source)
-                    for source in CHANNELS
+                    QUEUE_STEAM: steam_rows_by_app.get(app_id, 0),
+                    QUEUE_WIKIDATA: sum(1 for fact in facts if fact.source == QUEUE_WIKIDATA),
                 },
                 "refresh_statuses": {
-                    source: dict(statuses)
-                    for source, statuses in sorted(source_statuses.items())
+                    source: dict(statuses) for source, statuses in sorted(source_statuses.items())
                 },
                 "steam_developers_publishers_seen": steam_names,
                 "wikidata_game_status": game_status,
@@ -386,7 +341,6 @@ async def _validate_database(
 
     structural_errors = [
         *invalid_facts,
-        *invalid_steamspy,
         *[f"duplicate SourceFact key: {row}" for row in duplicate_fact_groups],
         *[f"duplicate WikidataGameLink key: {row}" for row in duplicate_link_groups],
     ]
@@ -409,7 +363,7 @@ async def _validate_database(
         "missing_tasks": missing_tasks,
         "source_failures": source_failures,
         "source_not_found": source_not_found,
-        "facts_total": len(all_facts),
+        "facts_total": len(all_facts) + sum(steam_rows_by_app.values()),
         "refreshes_total": len(all_refreshes),
         "games_total": len(all_games),
         "app_reports": app_reports,
@@ -550,7 +504,7 @@ def _render_report(benchmark: dict[str, object]) -> str:
         (
             "Структурная проверка не утверждает, что внешний источник семантически прав. "
             "Она проверяет уникальность текущих фактов, допустимость скалярных значений, "
-            "ограничения SteamSpy и наличие ожидаемых задач по цепочке."
+            "ограничения Steam и наличие ожидаемых задач по цепочке."
         ),
         "",
         "## Метрики по каналам",
@@ -671,8 +625,7 @@ def _render_report(benchmark: dict[str, object]) -> str:
         lines.extend(
             [
                 "",
-                "Допустимые результаты `not_found` "
-                "(источник ответил, но совпадение не найдено):",
+                "Допустимые результаты `not_found` (источник ответил, но совпадение не найдено):",
             ]
         )
         lines.extend(f"- {item}" for item in source_not_found)
@@ -728,10 +681,6 @@ async def run(
         PipelineServices(
             steam=SteamGameSyncService(database),
             wikidata=WikidataSyncService(database),
-            steamspy=SteamSpySyncService(database),
-            pcgamingwiki=PCGamingWikiSyncService(database),
-            hltb=HltbSyncService(database),
-            metacritic=MetacriticSyncService(database),
         )
     )
     http_metrics: dict[str, HttpChannelMetrics] = {}
@@ -772,7 +721,9 @@ async def run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run and measure the six-channel scraper pipeline")
+    parser = argparse.ArgumentParser(
+        description="Run and measure the five-channel scraper pipeline"
+    )
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--limit", type=int, default=5)

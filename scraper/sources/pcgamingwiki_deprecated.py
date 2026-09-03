@@ -1,15 +1,21 @@
+"""Deprecated standalone PCGamingWiki source.
+
+The source remains importable while its Cargo client is being reworked, but it
+is intentionally not part of :class:`scraper.pipeline.ScraperPipeline`.
+"""
+
 from __future__ import annotations
 
 import httpx
 
-from scraper.pcgamingwiki import PCGamingWikiClient, PCGamingWikiError
+from scraper.pcgamingwiki_deprecated import PCGamingWikiClient, PCGamingWikiError
 from scraper.wikidata.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 
 
 class PCGamingWikiSyncService(CachedSourceService):
-    """Refresh a PCGamingWiki page into scalar ORM facts."""
+    """Legacy PCGamingWiki synchronizer kept outside the active pipeline."""
 
     source = "pcgamingwiki"
 

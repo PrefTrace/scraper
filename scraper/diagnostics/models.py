@@ -16,4 +16,3 @@ class Diagnostic(BaseModel):
     message: str
     severity: DiagnosticSeverity = DiagnosticSeverity.WARNING
     details: dict[str, Any] = Field(default_factory=dict)
-

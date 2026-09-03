@@ -2,7 +2,16 @@
 
 Асинхронный набор source-сервисов. Сервисы не возвращают агрегированный JSON:
 они получают AppID, проверяют TTL в SQLite и сохраняют обновлённые значения в
-ORM-таблицы `SourceRefresh`, `SourceFact` и `SourceDiagnostic`.
+операционные таблицы `SourceRefresh`/`SourceDiagnostic` и source-specific ORM-
+таблицы соответствующего источника. Steam хранится в таблицах `steam_*`, а
+универсальный `SourceFact` оставлен только для legacy/Wikidata-совместимости.
+
+Требования разделены по границам сервисов:
+
+- [Scraper Service](TECHNICAL_SPEC_SCRAPER_SERVICE.md) — очереди, TTL,
+  источники и промежуточное ORM-состояние;
+- [Materializer Service](TECHNICAL_SPEC_MATERIALIZER_SERVICE.md) — каноническая
+  PostgreSQL-модель, идентичности сущностей и четыре разрешённых вектора.
 
 ## Каталог Steam AppID
 
@@ -42,12 +51,10 @@ import asyncio
 
 from scraper import (
     PipelineServices,
-    PCGamingWikiSyncService,
     ScraperConfig,
     ScraperDatabase,
     ScraperPipeline,
     SteamGameSyncService,
-    SteamSpySyncService,
     WikidataSyncService,
 )
 
@@ -62,8 +69,6 @@ async def main() -> None:
             PipelineServices(
                 steam=SteamGameSyncService(database),
                 wikidata=WikidataSyncService(database),
-                pcgamingwiki=PCGamingWikiSyncService(database),
-                steamspy=SteamSpySyncService(database),
             )
         )
         # Для тестового запуска используется ограниченный префикс файла.
@@ -75,10 +80,9 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`WikidataSyncService`, `SteamGameSyncService`, `HltbSyncService`,
-`MetacriticSyncService`, `PCGamingWikiSyncService` и `SteamSpySyncService`
-используют один общий TTL-кеш в базе. Очередь хранит только текущие задачи в
-памяти; факты, TTL и результаты source-сервисов сохраняются в ORM.
+`WikidataSyncService` и `SteamGameSyncService` используют общий TTL-кеш в базе.
+Очередь хранит только текущие задачи в памяти; факты, TTL и результаты
+источников сохраняются в ORM.
 
 Steam является первичным источником для цепочки обогащения. Результат
 `SteamGameSyncService.refresh()` возвращает текущие списки `developers` и
@@ -99,36 +103,27 @@ Wikidata ищется напрямую по Steam AppID через `P1733`, за
 
 Поля `languages` и `game_mechanics` в результат Wikidata не входят.
 
-## PCGamingWiki
+## PCGamingWiki (deprecated)
 
-`PCGamingWikiSyncService` получает страницу игры по AppID. Сначала используется
-официальный AppID redirect endpoint; если он недоступен, выполняется MediaWiki
-поиск по переданному названию и проверка AppID в `Infobox game`. В ORM попадают
-заголовок и URL страницы, Steam AppID, cover, разработчики, издатели, движки,
-релизы, внешние IDs, секции и поля инфобокса как адресуемые scalar-факты.
+`PCGamingWikiSyncService` оставлен отдельным импортируемым модулем, но помечен
+deprecated и исключён из `ScraperPipeline`: он не имеет очереди, worker’а и не
+получает задач после завершения Steam. Cargo-клиент будет доработан отдельно.
 
-Для PCGamingWiki действует отдельный межзапросный интервал по умолчанию 2.1
-секунды:
+## Deprecated-источники
 
-```text
-SCRAPER_PCGAMINGWIKI_MIN_INTERVAL_SECONDS=2.1
-```
+Steam — единственный активный parser в pipeline. `steamspy_deprecated`,
+`hltb_deprecated`, `metacritic_deprecated` и `pcgamingwiki_deprecated` вынесены
+в явно переименованные подпакеты/модули и не имеют очередей в pipeline.
 
-## SteamSpy
+## Steam
 
-`SteamSpySyncService` сохраняет в scope `stats` только согласованный набор:
-
-- `app_id`;
-- `owners_min` и `owners_max`;
-- среднее и медианное время игры за всё время и за последние 2 недели, в минутах;
-- `ccu`;
-- теги с голосами по путям `tags.<tag>`.
-
-Оценки SteamSpy не являются официальными продажами или точным числом игроков.
-Для обычных запросов используется ограничитель
-`SCRAPER_STEAMSPY_MIN_INTERVAL_SECONDS` с дефолтом 1 секунда. Массовый endpoint
-каталога SteamSpy в этот source не входит; список AppID остаётся за существующим
-Steam-методом.
+`SteamGameSyncService` сохраняет локализованную информацию и поддерживаемые
+языки, диапазон даты выхода, платформы, системные требования на английском,
+медиа, издания и цены, бандлы, внешние ссылки, возрастные рейтинги и
+дескрипторы, фичи, Steam Deck, EULA, контроллеры, разработчиков/издателей,
+публичные ветки сборок из AppInfo, статистику языков отзывов, отзывы и
+достижения. Ветки с паролем не сохраняются. Сбор CCU по ТЗ на этом этапе не
+выполняется.
 
 ## Конфигурация
 
@@ -143,8 +138,7 @@ SCRAPER_BATCH_SIZE=50
 SCRAPER_REQUEST_TIMEOUT_SECONDS=35
 SCRAPER_CONNECT_TIMEOUT_SECONDS=15
 SCRAPER_USER_AGENT=game-scraper/1.0
-SCRAPER_PCGAMINGWIKI_MIN_INTERVAL_SECONDS=2.1
-SCRAPER_STEAMSPY_MIN_INTERVAL_SECONDS=1.0
+SCRAPER_REVIEW_MIN_LENGTH_CHARS=200
 ```
 
 ## Проверки и демо
@@ -156,18 +150,5 @@ SCRAPER_STEAMSPY_MIN_INTERVAL_SECONDS=1.0
 .\.venv\Scripts\mypy.exe scraper
 ```
 
-В `demo/` находятся измерения Wikidata, PCGamingWiki и SteamSpy, а также примеры
-ORM-выгрузки. Для PCGamingWiki:
-
-```powershell
-.\.venv\Scripts\python.exe demo\benchmark_pcgamingwiki.py --app-id 620 --title "Portal 2"
-```
-
-Скрипт сравнивает принудительное обновление с повторным вызовом при свежем TTL.
+В `demo/` находятся измерения Wikidata и примеры ORM-выгрузки.
 Каталог AppID для демо по-прежнему берётся существующим Steam-путём.
-
-Для SteamSpy аналогичный замер запускается так:
-
-```powershell
-.\.venv\Scripts\python.exe demo\benchmark_steamspy.py --app-id 620
-```

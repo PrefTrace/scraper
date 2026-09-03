@@ -4,8 +4,8 @@ import httpx
 import respx
 from sqlalchemy import select
 
-from scraper.sources.steamspy import SteamSpySyncService
-from scraper.steamspy.client import STEAMSPY_API_URL, parse_stats
+from scraper.sources.steamspy_deprecated import SteamSpySyncService
+from scraper.steamspy_deprecated.client import STEAMSPY_API_URL, parse_stats
 from scraper.wikidata.config import ScraperConfig
 from scraper.wikidata.orm import ScraperDatabase, SourceFact
 
@@ -37,9 +37,7 @@ def test_steamspy_parser_keeps_only_requested_metrics() -> None:
 
 @respx.mock
 async def test_steamspy_stats_are_saved_as_orm_facts_and_ttl_cached(tmp_path) -> None:
-    route = respx.get(STEAMSPY_API_URL).mock(
-        return_value=httpx.Response(200, json=PAYLOAD)
-    )
+    route = respx.get(STEAMSPY_API_URL).mock(return_value=httpx.Response(200, json=PAYLOAD))
     config = ScraperConfig(
         database_url=f"sqlite+aiosqlite:///{(tmp_path / 'steamspy.sqlite3').as_posix()}",
         steamspy_min_interval_seconds=0,

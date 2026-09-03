@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import httpx
 
-from scraper.steamspy import SteamSpyClient, SteamSpyError
+from scraper.steamspy_deprecated import SteamSpyClient, SteamSpyError
 from scraper.wikidata.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 
 
 class SteamSpySyncService(CachedSourceService):
-    """Refresh SteamSpy ownership, playtime, CCU and tag-vote facts."""
+    """Legacy SteamSpy synchronizer kept outside the active pipeline."""
 
     source = "steamspy"
 

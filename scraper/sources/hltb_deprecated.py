@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from scraper.hltb.client import _load_hltb
+from scraper.hltb_deprecated.client import _load_hltb
 from scraper.wikidata.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 
 
 class HltbSyncService(CachedSourceService):
-    """Persist HLTB data as scalar ORM facts for one Steam game."""
+    """Legacy HLTB synchronizer kept outside the active pipeline."""
 
     source = "hltb"
 

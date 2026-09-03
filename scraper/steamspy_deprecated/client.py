@@ -62,9 +62,7 @@ class SteamSpyClient:
                     follow_redirects=True,
                 )
                 if 400 <= response.status_code < 500 and response.status_code != 429:
-                    raise SteamSpyError(
-                        f"SteamSpy returned HTTP {response.status_code}"
-                    )
+                    raise SteamSpyError(f"SteamSpy returned HTTP {response.status_code}")
                 if response.status_code == 429 or response.status_code >= 500:
                     if attempt < 2:
                         retry_after = response.headers.get("Retry-After")
@@ -96,9 +94,7 @@ def parse_stats(payload: Mapping[str, Any], *, app_id: int) -> SteamSpyStats:
     if raw_app_id is None:
         raise SteamSpyError(f"SteamSpy has no data for AppID {app_id}")
     if raw_app_id not in (app_id, None):
-        raise SteamSpyError(
-            f"SteamSpy returned AppID {raw_app_id!r} for requested AppID {app_id}"
-        )
+        raise SteamSpyError(f"SteamSpy returned AppID {raw_app_id!r} for requested AppID {app_id}")
     if raw_app_id == 999999:
         raise SteamSpyError(f"SteamSpy data is hidden for AppID {app_id}")
     owners_min, owners_max = _owner_bounds(payload.get("owners"))

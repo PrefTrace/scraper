@@ -72,9 +72,7 @@ class WikidataAlias(Base):
 
 class WikidataFact(Base):
     __tablename__ = "wikidata_facts"
-    __table_args__ = (
-        Index("ix_wikidata_facts_subject_property", "subject_qid", "property_id"),
-    )
+    __table_args__ = (Index("ix_wikidata_facts_subject_property", "subject_qid", "property_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     subject_qid: Mapped[str] = mapped_column(
@@ -262,6 +260,10 @@ class ScraperDatabase:
         return self.session_factory()
 
     async def create_schema(self) -> None:
+        # Register source-specific Steam tables before creating the shared
+        # metadata. The import is local to avoid a module-level ORM cycle.
+        from scraper.steam import orm as _steam_orm  # noqa: F401
+
         async with self.engine.begin() as connection:
             await connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             await connection.exec_driver_sql("PRAGMA journal_mode=WAL")

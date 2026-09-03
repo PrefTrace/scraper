@@ -9,9 +9,7 @@ import httpx
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 STEAM_APP_ID_PROPERTY = "P1733"
-WIKIDATA_USER_AGENT = (
-    "game-scraper/1.0 (https://www.wikidata.org/wiki/Wikidata:Data_access)"
-)
+WIKIDATA_USER_AGENT = "game-scraper/1.0 (https://www.wikidata.org/wiki/Wikidata:Data_access)"
 
 
 class WikidataError(RuntimeError):

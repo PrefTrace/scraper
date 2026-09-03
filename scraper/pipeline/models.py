@@ -5,10 +5,6 @@ from datetime import UTC, datetime
 
 QUEUE_STEAM = "steam"
 QUEUE_WIKIDATA = "wikidata"
-QUEUE_STEAMSPY = "steamspy"
-QUEUE_PCGAMINGWIKI = "pcgamingwiki"
-QUEUE_HLTB = "hltb"
-QUEUE_METACRITIC = "metacritic"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,11 +129,7 @@ def source_game_task(
 
 __all__ = [
     "EnqueueResult",
-    "QUEUE_HLTB",
-    "QUEUE_METACRITIC",
-    "QUEUE_PCGAMINGWIKI",
     "QUEUE_STEAM",
-    "QUEUE_STEAMSPY",
     "QUEUE_WIKIDATA",
     "QueueTask",
     "TaskState",

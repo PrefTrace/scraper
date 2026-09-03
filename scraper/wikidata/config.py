@@ -5,9 +5,7 @@ from dataclasses import dataclass
 
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./scraper.sqlite3"
 DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60
-DEFAULT_USER_AGENT = (
-    "game-scraper/1.0 (https://www.wikidata.org/wiki/Wikidata:Data_access)"
-)
+DEFAULT_USER_AGENT = "game-scraper/1.0 (https://www.wikidata.org/wiki/Wikidata:Data_access)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +22,7 @@ class ScraperConfig:
     user_agent: str = DEFAULT_USER_AGENT
     pcgamingwiki_min_interval_seconds: float = 2.1
     steamspy_min_interval_seconds: float = 1.0
+    review_min_length_chars: int = 200
 
     @classmethod
     def from_env(cls) -> ScraperConfig:
@@ -44,6 +43,10 @@ class ScraperConfig:
                 "SCRAPER_STEAMSPY_MIN_INTERVAL_SECONDS",
                 1.0,
             ),
+            review_min_length_chars=_env_int(
+                "SCRAPER_REVIEW_MIN_LENGTH_CHARS",
+                200,
+            ),
         )
         config.validate()
         return config
@@ -61,6 +64,8 @@ class ScraperConfig:
             raise ValueError("SCRAPER_PCGAMINGWIKI_MIN_INTERVAL_SECONDS cannot be negative")
         if self.steamspy_min_interval_seconds < 0:
             raise ValueError("SCRAPER_STEAMSPY_MIN_INTERVAL_SECONDS cannot be negative")
+        if self.review_min_length_chars < 0:
+            raise ValueError("SCRAPER_REVIEW_MIN_LENGTH_CHARS cannot be negative")
         if not self.user_agent.strip():
             raise ValueError("SCRAPER_USER_AGENT cannot be empty")
 

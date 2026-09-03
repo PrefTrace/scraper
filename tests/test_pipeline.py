@@ -82,13 +82,26 @@ async def test_pipeline_registers_wikidata_game_and_people_together() -> None:
     assert "wikidata:game:app:620" in keys
     assert "wikidata:organization-name:valve corporation" in keys
     assert len(states) == 2
-    organization = next(
-        state for state in states if state.task.task_type == "organization_name"
-    )
+    organization = next(state for state in states if state.task.task_type == "organization_name")
     assert organization.subscribers == {
         TaskSubscriber(app_id=620, relation="developer"),
         TaskSubscriber(app_id=620, relation="publisher"),
     }
+
+
+@pytest.mark.asyncio
+async def test_pipeline_excludes_deprecated_pcgamingwiki_queue() -> None:
+    pipeline = ScraperPipeline(
+        PipelineServices(
+            steam=object(),  # type: ignore[arg-type]
+            wikidata=object(),  # type: ignore[arg-type]
+        )
+    )
+
+    assert pipeline.queue.has_queue("pcgamingwiki") is False
+    assert pipeline.queue.has_queue("steamspy") is False
+    assert pipeline.queue.has_queue("hltb") is False
+    assert pipeline.queue.has_queue("metacritic") is False
 
 
 @pytest.mark.asyncio

@@ -150,3 +150,23 @@ class SteamClient:
         if payload.get("success") != 1:
             raise SteamClientError(f"Steam reviews unavailable for app {app_id}")
         return payload
+
+    async def public_app_info(self, app_id: int) -> dict[str, Any]:
+        """Fetch public Steam AppInfo without a publisher API key.
+
+        The service exposes the public AppInfo/PICS data used by SteamCMD,
+        including public depot branches. Password-protected branch metadata is
+        filtered by ``parse_build_branches`` before it reaches storage.
+        """
+
+        response = await self._get(
+            f"https://api.steamcmd.net/v1/info/{app_id}",
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SteamClientError(f"Unexpected Steam AppInfo response for app {app_id}")
+        apps = payload.get("data")
+        result = apps.get(str(app_id)) if isinstance(apps, dict) else None
+        if not isinstance(result, dict):
+            raise SteamClientError(f"Steam AppInfo has no app {app_id}")
+        return result

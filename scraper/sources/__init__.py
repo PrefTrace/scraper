@@ -1,11 +1,11 @@
 """ORM-backed source synchronizers used by the application pipeline."""
 
 from .base import CachedSourceService
-from .hltb import HltbSyncService
-from .metacritic import MetacriticSyncService
-from .pcgamingwiki import PCGamingWikiSyncService
+from .hltb_deprecated import HltbSyncService
+from .metacritic_deprecated import MetacriticSyncService
+from .pcgamingwiki_deprecated import PCGamingWikiSyncService
 from .steam import SteamGameSyncService, SteamRefreshResult
-from .steamspy import SteamSpySyncService
+from .steamspy_deprecated import SteamSpySyncService
 
 __all__ = [
     "CachedSourceService",

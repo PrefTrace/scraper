@@ -46,6 +46,8 @@ _FULL_GAME_PROPERTIES = {
     "P767",
     "P725",
 }
+
+
 class WikidataSyncError(RuntimeError):
     """Raised when an ORM refresh cannot be completed."""
 
@@ -330,15 +332,12 @@ class WikidataSyncService:
             for qid in unique_ids - full_ids
             if force or not _is_fresh(rows.get(qid), full=False, cutoff=self._cutoff(now))
         }
-        batches = [
-            (batch, True)
-            for batch in _chunks(stale_full, self.config.batch_size)
-        ] + [
-            (batch, False)
-            for batch in _chunks(stale_labels, self.config.batch_size)
+        batches = [(batch, True) for batch in _chunks(stale_full, self.config.batch_size)] + [
+            (batch, False) for batch in _chunks(stale_labels, self.config.batch_size)
         ]
         if not batches:
             return
+
         async def fetch_batch(batch: list[str], full: bool) -> None:
             locks = [self._entity_locks.setdefault(qid, asyncio.Lock()) for qid in batch]
             for lock in locks:
@@ -350,9 +349,7 @@ class WikidataSyncService:
                         entity.qid: entity
                         for entity in (
                             await session.scalars(
-                                select(WikidataEntity).where(
-                                    WikidataEntity.qid.in_(batch)
-                                )
+                                select(WikidataEntity).where(WikidataEntity.qid.in_(batch))
                             )
                         ).all()
                     }
@@ -420,11 +417,7 @@ class WikidataSyncService:
             now = utcnow()
             async with self.database.session() as session:
                 lookup = await session.get(WikidataNameLookup, normalized_name)
-                if (
-                    not force
-                    and lookup is not None
-                    and lookup.searched_at >= self._cutoff(now)
-                ):
+                if not force and lookup is not None and lookup.searched_at >= self._cutoff(now):
                     values = (
                         await session.scalars(
                             select(WikidataNameLookupResult.qid).where(
@@ -536,6 +529,7 @@ class WikidataSyncService:
     def _cutoff(self, now: datetime) -> datetime:
         return now - timedelta(seconds=self.config.ttl_seconds)
 
+
 async def _save_entity_payload(
     session: AsyncSession,
     payload: Mapping[str, Any],
@@ -604,9 +598,7 @@ async def _save_entity_payload(
                 continue
             for value in values:
                 if isinstance(value, dict) and isinstance(value.get("value"), str):
-                    session.add(
-                        WikidataAlias(qid=qid, language=language, alias=value["value"])
-                    )
+                    session.add(WikidataAlias(qid=qid, language=language, alias=value["value"]))
     entity.updated_at = observed_at
     return entity
 
@@ -625,9 +617,7 @@ def _fact_from_statement(
         subject_qid=subject_qid,
         property_id=property_id,
         rank=(
-            statement.get("rank", "normal")
-            if isinstance(statement.get("rank"), str)
-            else "normal"
+            statement.get("rank", "normal") if isinstance(statement.get("rank"), str) else "normal"
         ),
         observed_at=observed_at,
         source_revision=source_revision,

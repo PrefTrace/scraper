@@ -152,9 +152,7 @@ async def test_fresh_entity_is_not_requested_again(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_empty_labels_are_cached_as_a_successful_fetch(tmp_path) -> None:
     database = ScraperDatabase(
-        ScraperConfig(
-            database_url=f"sqlite+aiosqlite:///{(tmp_path / 'empty.sqlite3').as_posix()}"
-        )
+        ScraperConfig(database_url=f"sqlite+aiosqlite:///{(tmp_path / 'empty.sqlite3').as_posix()}")
     )
     await database.create_schema()
     service = WikidataSyncService(database)
@@ -199,6 +197,7 @@ async def test_concurrent_refreshes_share_entity_cache_lock(tmp_path) -> None:
     service = WikidataSyncService(database)
     await service.ensure_schema()
     try:
+
         class FakeClient:
             calls = 0
 
@@ -239,6 +238,7 @@ async def test_missing_game_still_resolves_steam_organizations(monkeypatch, tmp_
     service = WikidataSyncService(database)
     await service.ensure_schema()
     try:
+
         class FakeWikidataClient:
             search_calls = 0
 

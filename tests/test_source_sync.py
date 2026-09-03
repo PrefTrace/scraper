@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from scraper.models import HltbData
-from scraper.sources.hltb import HltbSyncService
+from scraper.sources.hltb_deprecated import HltbSyncService
 from scraper.sources.steam import SteamGameSyncService
+from scraper.steam.orm import SteamApp, SteamBuildBranch, SteamOrganizationCredit
 from scraper.wikidata.config import ScraperConfig
 from scraper.wikidata.orm import ScraperDatabase, SourceFact, SourceRefresh
 
@@ -34,7 +37,7 @@ async def test_hltb_source_refresh_uses_ttl_cache(monkeypatch, tmp_path) -> None
         calls += 1
         return HltbData(id=7, name="Example", main_story_hours=4.5), None
 
-    monkeypatch.setattr("scraper.sources.hltb._load_hltb", fake_fetch)
+    monkeypatch.setattr("scraper.sources.hltb_deprecated._load_hltb", fake_fetch)
     database = _database(tmp_path, "hltb.sqlite3")
     service = HltbSyncService(database)
     try:
@@ -80,6 +83,19 @@ async def test_steam_details_and_substructures_are_orm_cached(monkeypatch, tmp_p
             type(self).calls += 1
             return "<html></html>"
 
+        async def public_app_info(self, _app_id):
+            type(self).calls += 1
+            return {
+                "depots": {
+                    "branches": {
+                        "public": {
+                            "buildid": "123",
+                            "timeupdated": "1700000000",
+                        }
+                    }
+                }
+            }
+
         async def review_page(self, _app_id, *, language, review_type, cursor="*"):
             type(self).calls += 1
             return {
@@ -103,7 +119,7 @@ async def test_steam_details_and_substructures_are_orm_cached(monkeypatch, tmp_p
         calls_after_first = FakeSteamClient.calls
         second = await service.refresh(42, languages=["en-US"], store_country="kz")
 
-        assert len(first.refreshes) == len(second.refreshes) == 7
+        assert len(first.refreshes) == len(second.refreshes) == 8
         assert first.developers == second.developers == ["Dev"]
         assert first.publishers == second.publishers == ["Pub"]
         assert calls_after_first > 0
@@ -114,7 +130,27 @@ async def test_steam_details_and_substructures_are_orm_cached(monkeypatch, tmp_p
                 {"source": "steam", "steam_app_id": 42, "scope": "details:en-US:kz"},
             )
             assert state is not None and state.status == "ready"
-        facts = await _source_facts(database, "steam", 42)
-        assert any(fact.path == "localized.name" and fact.value_text == "Example" for fact in facts)
+        async with database.session() as session:
+            app = await session.get(SteamApp, 42)
+            branch = await session.get(SteamBuildBranch, (42, "public"))
+            organizations = (
+                await session.scalars(
+                    select(SteamOrganizationCredit)
+                    .where(SteamOrganizationCredit.app_id == 42)
+                    .order_by(SteamOrganizationCredit.organization_name)
+                )
+            ).all()
+            steam_facts = (
+                await session.scalars(
+                    select(SourceFact).where(
+                        SourceFact.source == "steam",
+                        SourceFact.steam_app_id == 42,
+                    )
+                )
+            ).all()
+        assert app is not None and app.type == "game"
+        assert branch is not None and branch.build_id == 123
+        assert [item.organization_name for item in organizations] == ["Dev", "Pub"]
+        assert steam_facts == []
     finally:
         await database.dispose()

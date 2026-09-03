@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import httpx
 
-from scraper.metacritic.client import _load_metacritic
+from scraper.metacritic_deprecated.client import _load_metacritic
 from scraper.wikidata.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 
 
 class MetacriticSyncService(CachedSourceService):
-    """Persist Metacritic data as scalar ORM facts for one Steam game."""
+    """Legacy Metacritic synchronizer kept outside the active pipeline."""
 
     source = "metacritic"
 

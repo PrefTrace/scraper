@@ -29,9 +29,9 @@ async def test_official_app_id_source_continues_by_last_appid() -> None:
             }
         return httpx.Response(200, json=payload, request=request)
 
-    route = respx.get(
-        "https://api.steampowered.com/IStoreService/GetAppList/v1/"
-    ).mock(side_effect=response)
+    route = respx.get("https://api.steampowered.com/IStoreService/GetAppList/v1/").mock(
+        side_effect=response
+    )
 
     async with httpx.AsyncClient() as http:
         app_ids = await fetch_app_ids(SteamClient(http), api_key="test-key")
@@ -46,9 +46,7 @@ async def test_official_app_id_source_continues_by_last_appid() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_official_app_id_source_can_stop_at_requested_limit() -> None:
-    route = respx.get(
-        "https://api.steampowered.com/IStoreService/GetAppList/v1/"
-    ).mock(
+    route = respx.get("https://api.steampowered.com/IStoreService/GetAppList/v1/").mock(
         return_value=httpx.Response(
             200,
             json={

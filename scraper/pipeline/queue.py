@@ -124,8 +124,7 @@ class InMemoryTaskQueue:
                 queue: {
                     "attempted": self._enqueue_attempts[queue],
                     "created": self._enqueue_created[queue],
-                    "deduplicated": self._enqueue_attempts[queue]
-                    - self._enqueue_created[queue],
+                    "deduplicated": self._enqueue_attempts[queue] - self._enqueue_created[queue],
                 }
                 for queue in self._queues
             }
