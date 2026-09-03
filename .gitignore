@@ -227,3 +227,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Large generated Steam metabase; keep benchmark SQLite artifacts separate.
+outputs/steam_metabase/*.sqlite
