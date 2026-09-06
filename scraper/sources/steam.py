@@ -17,6 +17,7 @@ from scraper.steam.locales import (
 )
 from scraper.steam.orm import SteamAppLocalization, SteamOrganizationCredit
 from scraper.steam.parsers import (
+    normalize_steam_type,
     parse_achievement_schema,
     parse_app_details,
     parse_appinfo_languages,
@@ -28,6 +29,7 @@ from scraper.steam.parsers import (
     parse_external_reviews,
     parse_global_achievement_percentages,
     parse_language_table,
+    parse_package_metadata,
     parse_store_browse_item,
     parse_tags,
 )
@@ -60,6 +62,10 @@ class SteamGameSyncService(CachedSourceService):
     """
 
     source = "steam"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._eligibility_checked: set[int] = set()
 
     async def ensure_schema(self) -> None:
         if self._schema_ready:
@@ -96,14 +102,33 @@ class SteamGameSyncService(CachedSourceService):
             app_info_lock = asyncio.Lock()
             browse_cache: dict[str, dict[str, Any]] = {}
             browse_lock = asyncio.Lock()
+            package_metadata_cache: dict[str, dict[int, dict[str, Any]]] = {}
+            package_metadata_lock = asyncio.Lock()
             achievement_percentages: dict[str, float] | None = None
             achievement_percentages_lock = asyncio.Lock()
+            category_registry: dict[int, str] | None = None
+            category_registry_lock = asyncio.Lock()
 
             async def get_app_info() -> dict[str, Any]:
                 async with app_info_lock:
                     if app_id not in app_info_cache:
                         app_info_cache[app_id] = await steam.public_app_info(app_id)
                     return app_info_cache[app_id]
+
+            async def get_category_registry() -> dict[int, str]:
+                nonlocal category_registry
+                async with category_registry_lock:
+                    if category_registry is None:
+                        try:
+                            loader = getattr(steam, "category_registry", None)
+                            category_registry = (
+                                await loader(api_key=self.config.steam_web_api_key)
+                                if loader is not None
+                                else {}
+                            )
+                        except (SteamClientError, httpx.HTTPError):
+                            category_registry = {}
+                    return category_registry
 
             async def get_store_browse(
                 locale: LocaleInfo, *, bundle_id: int | None = None
@@ -144,23 +169,89 @@ class SteamGameSyncService(CachedSourceService):
                 enriched["_bundle_memberships"] = memberships
                 return enriched
 
+            async def get_package_metadata(
+                package_ids: set[int], locale: LocaleInfo
+            ) -> list[Any]:
+                if not package_ids:
+                    return []
+                cache_key = f"{locale.steam_language}:{country or 'US'}"
+                async with package_metadata_lock:
+                    cached = package_metadata_cache.setdefault(cache_key, {})
+                    missing_ids = package_ids - set(cached)
+                    if missing_ids:
+                        try:
+                            loader = getattr(steam, "package_details", None)
+                            fetched = (
+                                await loader(
+                                    sorted(missing_ids),
+                                    locale,
+                                    store_country=country,
+                                )
+                                if loader is not None
+                                else {}
+                            )
+                            if isinstance(fetched, dict):
+                                cached.update(fetched)
+                        except (SteamClientError, httpx.HTTPError, TypeError):
+                            pass
+                    return parse_package_metadata(
+                        {
+                            package_id: cached[package_id]
+                            for package_id in package_ids
+                            if package_id in cached
+                        }
+                    )
+
+            async def enrich_package_metadata(
+                parsed: dict[str, Any], locale: LocaleInfo
+            ) -> dict[str, Any]:
+                resolved_ids = {
+                    int(item.package_id)
+                    for item in parsed.get("editions", [])
+                    if getattr(item, "package_id", None) is not None
+                }
+                bundle_ids = {
+                    int(package_id)
+                    for bundle in parsed.get("bundles", [])
+                    for package_id in getattr(bundle, "edition_package_ids", [])
+                }
+                parsed["edition_metadata"] = await get_package_metadata(
+                    bundle_ids - resolved_ids,
+                    locale,
+                )
+                return parsed
+
             async def get_achievement_percentages() -> dict[str, float]:
                 nonlocal achievement_percentages
-                api_key = self.config.steam_web_api_key
-                if not api_key:
-                    raise SourceLoadError(
-                        "failed",
-                        "steam_api_key_missing",
-                        "STEAM_WEB_API_KEY is required for structured achievements",
-                    )
                 async with achievement_percentages_lock:
                     if achievement_percentages is None:
                         payload = await steam.global_achievement_percentages(
                             app_id,
-                            api_key=api_key,
                         )
                         achievement_percentages = parse_global_achievement_percentages(payload)
                     return achievement_percentages
+
+            if app_id not in self._eligibility_checked:
+                initial_app_info = await get_app_info()
+                initial_common = initial_app_info.get("common")
+                initial_common = initial_common if isinstance(initial_common, dict) else {}
+                raw_type = initial_common.get("type")
+                normalized_type = normalize_steam_type(raw_type)
+                self._eligibility_checked.add(app_id)
+                if raw_type not in (None, "") and normalized_type is None:
+                    state = await self._persist(
+                        app_id,
+                        "eligibility",
+                        data=None,
+                        status="not_found",
+                        error=(
+                            "unsupported_app_type",
+                            f"Steam app type is not indexed: {raw_type}",
+                        ),
+                    )
+                    return SteamRefreshResult(
+                        refreshes=[state], title=None, developers=[], publishers=[]
+                    )
 
             operations: list[Awaitable[SourceRefresh]] = []
             detail_scopes: list[str] = []
@@ -200,6 +291,7 @@ class SteamGameSyncService(CachedSourceService):
                             if english_key in requirements_data:
                                 data[english_key] = requirements_data[english_key]
                     app_info = await get_app_info()
+                    registry = await get_category_registry()
                     browse = await get_enriched_store_browse(locale)
                     parsed = parse_app_details(
                         data,
@@ -209,7 +301,9 @@ class SteamGameSyncService(CachedSourceService):
                         requirements_data=requirements_data,
                         app_info=app_info,
                         store_browse=browse,
+                        category_registry=registry,
                     )
+                    parsed = await enrich_package_metadata(parsed, locale)
                     if locale.steam_language == "english":
                         parsed["global_authoritative"] = True
                     else:
@@ -218,7 +312,7 @@ class SteamGameSyncService(CachedSourceService):
                         # written from the explicit English response.
                         english_locale = normalize_locales(["en-US"])[0]
                         english_browse = await get_enriched_store_browse(english_locale)
-                        parsed["global_data"] = parse_app_details(
+                        global_data = parse_app_details(
                             requirements_data,
                             english_locale,
                             app_id=app_id,
@@ -226,6 +320,11 @@ class SteamGameSyncService(CachedSourceService):
                             requirements_data=requirements_data,
                             app_info=app_info,
                             store_browse=english_browse,
+                            category_registry=registry,
+                        )
+                        parsed["global_data"] = await enrich_package_metadata(
+                            global_data,
+                            english_locale,
                         )
                         parsed["global_authoritative"] = True
                     return parsed
@@ -246,7 +345,14 @@ class SteamGameSyncService(CachedSourceService):
                     app_info = await get_app_info()
                     common = app_info.get("common") if isinstance(app_info, dict) else {}
                     common = common if isinstance(common, dict) else {}
-                    semantics = parse_appinfo_semantics(common)
+                    registry = await get_category_registry()
+                    semantics = parse_appinfo_semantics(
+                        common,
+                        registry=registry,
+                        config=app_info.get("config")
+                        if isinstance(app_info.get("config"), dict)
+                        else None,
+                    )
                     structured_languages = parse_appinfo_languages(
                         common.get("supported_languages")
                     )
@@ -273,6 +379,13 @@ class SteamGameSyncService(CachedSourceService):
                                 ),
                             }
                         )
+                    diagnostics.extend(
+                        {
+                            "code": "unknown_steam_category",
+                            "message": f"Steam category ID has no registry name: {category_id}",
+                        }
+                        for category_id in semantics.get("unknown_category_ids", [])
+                    )
                     return {
                         "supported_languages": supported_languages,
                         "diagnostics": diagnostics,
@@ -294,7 +407,23 @@ class SteamGameSyncService(CachedSourceService):
                             "steam_api_key_missing",
                             "STEAM_WEB_API_KEY is required for structured achievements",
                         )
-                    percentages = await get_achievement_percentages()
+                    diagnostics: list[dict[str, str]] = []
+                    try:
+                        percentages = await get_achievement_percentages()
+                    except SteamClientError:
+                        # Some public apps expose a schema but no global
+                        # percentage payload. Keep the structured achievement
+                        # rows and make the missing enrichment observable.
+                        percentages = {}
+                        diagnostics.append(
+                            {
+                                "code": "steam_global_achievement_percentages_unavailable",
+                                "message": (
+                                    "Steam global achievement percentages were unavailable; "
+                                    "achievement rows were stored with NULL global_percent"
+                                ),
+                            }
+                        )
                     schema = await steam.achievement_schema(
                         app_id,
                         api_key=api_key,
@@ -305,7 +434,8 @@ class SteamGameSyncService(CachedSourceService):
                             schema,
                             language=locale.requested,
                             percentages=percentages,
-                        )
+                        ),
+                        "diagnostics": diagnostics,
                     }
 
                 operations.extend(
@@ -322,14 +452,39 @@ class SteamGameSyncService(CachedSourceService):
                             store_loader,
                             force=force,
                         ),
+                    )
+                )
+                if self.config.steam_web_api_key:
+                    operations.append(
                         self._refresh_scope(
                             app_id,
                             achievement_scope,
                             achievement_loader,
                             force=force,
-                        ),
+                        )
                     )
-                )
+                elif locale is locales[0]:
+                    async def blocked_achievement_loader() -> object:
+                        return {
+                            "achievements": [],
+                            "diagnostics": [
+                                {
+                                    "code": "steam_api_key_missing",
+                                    "message": (
+                                        "STEAM_WEB_API_KEY is required for structured achievements"
+                                    ),
+                                }
+                            ],
+                        }
+
+                    operations.append(
+                        self._refresh_scope(
+                            app_id,
+                            "achievements:blocked",
+                            blocked_achievement_loader,
+                            force=force,
+                        )
+                    )
 
                 async def rating_loader(locale: LocaleInfo = locale) -> object:
                     return await _fetch_summary(

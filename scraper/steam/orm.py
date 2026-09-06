@@ -9,12 +9,10 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     ForeignKeyConstraint,
-    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,7 +32,6 @@ class SteamApp(Base):
     windows_build: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     mac_build: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     vac_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    metacritic_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     metacritic_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metacritic_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     gamepad_preferred: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -82,6 +79,7 @@ class SteamEdition(Base):
     package_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class SteamAppEdition(Base):
@@ -101,7 +99,7 @@ class SteamEditionPrice(Base):
     package_id: Mapped[int] = mapped_column(
         ForeignKey("steam_editions.package_id", ondelete="CASCADE"), primary_key=True
     )
-    price_region: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
+    currency: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -136,7 +134,7 @@ class SteamBundlePrice(Base):
     bundle_id: Mapped[int] = mapped_column(
         ForeignKey("steam_bundles.bundle_id", ondelete="CASCADE"), primary_key=True
     )
-    price_region: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
+    currency: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
     effective_discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -181,7 +179,7 @@ class SteamDescriptor(Base):
         ForeignKey("steam_age_ratings.age_id", ondelete="CASCADE"), index=True
     )
     steam_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    name: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SteamSystemRequirement(Base):
@@ -203,7 +201,7 @@ class SteamFeature(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     category_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
-    english_name: Mapped[str] = mapped_column(Text)
+    english_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SteamAccessibilityFeature(Base):
@@ -213,7 +211,7 @@ class SteamAccessibilityFeature(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     category_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
-    english_name: Mapped[str] = mapped_column(Text)
+    english_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SteamDeckSupport(Base):
@@ -237,7 +235,6 @@ class SteamEula(Base):
     )
     eula_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     name_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    steam_link_support: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -249,6 +246,7 @@ class SteamController(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     controller: Mapped[str] = mapped_column(String(128), primary_key=True)
+    support: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     bluetooth: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     usb: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
@@ -289,27 +287,25 @@ class SteamBuildBranch(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     build_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    download_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    disk_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    download_size_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    download_size_median: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    download_size_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disk_size_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disk_size_median: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disk_size_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class SteamReviewLanguageStat(Base):
     __tablename__ = "steam_review_language_stats"
     __table_args__ = (
         UniqueConstraint("app_id", "language", name="uq_steam_review_language_stat"),
-        Index(
-            "uq_steam_review_language_stat_all",
-            "app_id",
-            unique=True,
-            sqlite_where=text("language IS NULL"),
-        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
-    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    language: Mapped[str] = mapped_column(String(16), nullable=False)
     total_reviews: Mapped[int] = mapped_column(Integer, default=0)
     total_negative: Mapped[int] = mapped_column(Integer, default=0)
     total_positive: Mapped[int] = mapped_column(Integer, default=0)

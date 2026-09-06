@@ -86,14 +86,14 @@ def test_content_descriptor_names_and_unknown_ids_are_stable() -> None:
         (1, "Some Nudity or Sexual Content"),
         (2, "Frequent Violence or Gore"),
         (5, "General Mature Content"),
-        (99, "unknown"),
+        (99, None),
     ]
 
 
 def test_public_storebrowse_preserves_subscription_periods_and_bundle_membership() -> None:
     parsed = parse_store_browse_item(
         _fixture("storebrowse_281990.json"),
-        price_region="USD",
+        currency="USD",
         bundle_memberships={21037: [121840]},
     )
 

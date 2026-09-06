@@ -263,7 +263,6 @@ def test_app_details_cover_tz_relationships_media_and_metadata() -> None:
     assert parsed["eulas"][0].model_dump() == {
         "id": 7,
         "name_description": "ignored",
-        "steam_link_support": None,
         "url": "https://example/eula",
         "version": None,
     }

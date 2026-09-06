@@ -132,9 +132,9 @@ SCRAPER_REVIEW_MIN_LENGTH_CHARS=200
 STEAM_WEB_API_KEY=...
 ```
 
-`STEAM_WEB_API_KEY` нужен только для structured achievements и global
-achievement percentages; без него achievement scope получает явный diagnostic
-и не считается покрытым.
+`STEAM_WEB_API_KEY` нужен только для structured achievement schema. Global
+achievement percentages запрашиваются публичным endpoint без ключа; без ключа
+schema scope получает один явный diagnostic и не считается покрытым.
 
 ## Проверки и демо
 

@@ -107,7 +107,7 @@ class EditionPrice(Model):
     price_type: str = "one_time"
     period: str | None = None
     period_units: int | None = None
-    price_region: str | None = None
+    currency: str | None = None
 
 
 class Bundle(Model):
@@ -123,7 +123,7 @@ class BundlePrice(Model):
     effective_discount_percent: int | None = None
     initial: int | None = None
     final: int | None = None
-    price_region: str | None = None
+    currency: str | None = None
 
     @property
     def discount_percent(self) -> int | None:
@@ -139,7 +139,7 @@ class ExternalLink(Model):
 class Descriptor(Model):
     age_id: str
     steam_id: int | None = None
-    name: str
+    name: str | None = None
 
 
 class SystemRequirement(Model):
@@ -150,7 +150,7 @@ class SystemRequirement(Model):
 
 class Feature(Model):
     id: int | None = None
-    name: str
+    name: str | None = None
 
 
 class SteamDeckSupport(Model):
@@ -160,13 +160,13 @@ class SteamDeckSupport(Model):
 class ThirdPartyEula(Model):
     id: int | str | None = None
     name_description: str | None = None
-    steam_link_support: bool | None = None
     url: str | None = None
     version: str | None = None
 
 
 class Controller(Model):
     name: str
+    support: bool | None = None
     bluetooth: bool | None = None
     usb: bool | None = None
 
@@ -181,12 +181,16 @@ class BuildBranch(Model):
     updated_at: datetime | None = None
     description: str | None = None
     build_id: int | None = None
-    download_size: int | None = None
-    disk_size: int | None = None
+    download_size_min: int | None = None
+    download_size_median: int | None = None
+    download_size_max: int | None = None
+    disk_size_min: int | None = None
+    disk_size_median: int | None = None
+    disk_size_max: int | None = None
 
 
 class ReviewLanguageStats(Model):
-    language: str | None = None
+    language: str = "*"
     total_reviews: int = 0
     total_negative: int = 0
     total_positive: int = 0
@@ -202,7 +206,7 @@ class ExternalReview(Model):
 
 class Category(Model):
     id: int | None = None
-    name: str
+    name: str | None = None
     source: str = "steam"
 
 
@@ -227,7 +231,7 @@ class AgeRating(Model):
 
 class RatingSummary(Model):
     locale: str | None = None
-    review_language: str | None = None
+    review_language: str = "*"
     store_country: str | None = None
     score: int | None = None
     score_description: str | None = None

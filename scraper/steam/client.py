@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -10,6 +10,10 @@ from .locales import LocaleInfo
 
 class SteamClientError(RuntimeError):
     pass
+
+
+_CATEGORY_REGISTRY: dict[int, str] | None = None
+_CATEGORY_REGISTRY_LOCK = asyncio.Lock()
 
 
 class SteamClient:
@@ -111,12 +115,10 @@ class SteamClient:
     async def global_achievement_percentages(
         self,
         app_id: int,
-        *,
-        api_key: str,
     ) -> dict[str, Any]:
         response = await self._get(
             "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/",
-            params={"key": api_key, "gameid": app_id},
+            params={"gameid": app_id},
         )
         payload = response.json()
         if not isinstance(payload, dict):
@@ -124,6 +126,46 @@ class SteamClient:
                 f"Unexpected Steam global achievement percentages for app {app_id}"
             )
         return payload
+
+    async def category_registry(self, *, api_key: str | None = None) -> dict[int, str]:
+        """Load and process-cache Steam's English category definitions."""
+
+        global _CATEGORY_REGISTRY
+        if _CATEGORY_REGISTRY is not None:
+            return dict(_CATEGORY_REGISTRY)
+        async with _CATEGORY_REGISTRY_LOCK:
+            if _CATEGORY_REGISTRY is not None:
+                return dict(_CATEGORY_REGISTRY)
+            params: dict[str, Any] = {"language": "english"}
+            if api_key:
+                params["key"] = api_key
+            response = await self._get(
+                "https://api.steampowered.com/IStoreBrowseService/GetStoreCategories/v1/",
+                params=params,
+            )
+            payload = response.json()
+            response_data = payload.get("response") if isinstance(payload, dict) else None
+            raw_categories = (
+                response_data.get("categories")
+                if isinstance(response_data, dict)
+                else payload.get("categories") if isinstance(payload, dict) else None
+            )
+            registry: dict[int, str] = {}
+            for raw in raw_categories if isinstance(raw_categories, list) else []:
+                if not isinstance(raw, dict):
+                    continue
+                raw_category_id = raw.get("categoryid", raw.get("category_id", raw.get("id")))
+                name = raw.get("display_name", raw.get("name", raw.get("description")))
+                if raw_category_id is None:
+                    continue
+                try:
+                    category_id = int(raw_category_id)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(name, str) and name.strip():
+                    registry[category_id] = name.strip()
+            _CATEGORY_REGISTRY = registry
+            return dict(registry)
 
     async def store_app_list_page(
         self,
@@ -244,3 +286,43 @@ class SteamClient:
         if not isinstance(payload, dict):
             raise SteamClientError(f"Unexpected Steam StoreBrowse response for app {app_id}")
         return payload
+
+    async def package_details(
+        self,
+        package_ids: Sequence[int],
+        locale: LocaleInfo,
+        *,
+        store_country: str | None = None,
+    ) -> dict[int, dict[str, Any]]:
+        """Fetch public package metadata for bundle-only package placeholders."""
+
+        normalized_ids = list(dict.fromkeys(int(package_id) for package_id in package_ids))
+        if not normalized_ids:
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        async def fetch_one(package_id: int) -> tuple[int, dict[str, Any] | None]:
+            try:
+                response = await self._get(
+                    "https://store.steampowered.com/api/packagedetails",
+                    params={
+                        "packageids": str(package_id),
+                        **self._localized_params(locale, store_country),
+                    },
+                )
+                payload = response.json()
+            except SteamClientError:
+                return package_id, None
+            if not isinstance(payload, dict):
+                return package_id, None
+            raw_entry = payload.get(str(package_id))
+            if not isinstance(raw_entry, dict) or not raw_entry.get("success"):
+                return package_id, None
+            data = raw_entry.get("data")
+            return package_id, data if isinstance(data, dict) else None
+
+        for package_id, data in await asyncio.gather(
+            *(fetch_one(package_id) for package_id in normalized_ids)
+        ):
+            if data is not None:
+                result[package_id] = data
+        return result

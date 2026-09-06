@@ -63,7 +63,6 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "windows_build": _c("BOOLEAN", True),
             "mac_build": _c("BOOLEAN", True),
             "vac_enabled": _c("BOOLEAN", True),
-            "metacritic_name": _c("TEXT", True),
             "metacritic_score": _c("INTEGER", True),
             "metacritic_url": _c("TEXT", True),
             "gamepad_preferred": _c("BOOLEAN", True),
@@ -142,6 +141,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "package_id": _c("INTEGER"),
             "name": _c("TEXT", True),
             "description": _c("TEXT", True),
+            "resolved": _c("BOOLEAN"),
         },
         technical={},
         primary_key=("package_id",),
@@ -149,7 +149,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
     "steam_edition_prices": T(
         domain={
             "package_id": _c("INTEGER"),
-            "price_region": _c("TEXT"),
+            "currency": _c("TEXT"),
             "initial": _c("INTEGER", True),
             "final": _c("INTEGER", True),
             "discount_percent": _c("INTEGER", True),
@@ -158,7 +158,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "period_units": _c("INTEGER", True),
         },
         technical={},
-        primary_key=("package_id", "price_region"),
+        primary_key=("package_id", "currency"),
         foreign_keys=(_fk(("package_id",), "steam_editions", ("package_id",)),),
         literals={
             "price_type": frozenset({"one_time", "recurring"}),
@@ -195,13 +195,13 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
     "steam_bundle_prices": T(
         domain={
             "bundle_id": _c("INTEGER"),
-            "price_region": _c("TEXT"),
+            "currency": _c("TEXT"),
             "effective_discount_percent": _c("INTEGER", True),
             "initial": _c("INTEGER", True),
             "final": _c("INTEGER", True),
         },
         technical={},
-        primary_key=("bundle_id", "price_region"),
+        primary_key=("bundle_id", "currency"),
         foreign_keys=(_fk(("bundle_id",), "steam_bundles", ("bundle_id",)),),
     ),
     "steam_external_links": T(
@@ -232,7 +232,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
     ),
     "steam_descriptors": T(
-        domain={"age_id": _c("TEXT"), "steam_id": _c("INTEGER", True), "name": _c("TEXT")},
+        domain={"age_id": _c("TEXT"), "steam_id": _c("INTEGER", True), "name": _c("TEXT", True)},
         technical={"id": _c("INTEGER")},
         primary_key=("id",),
         unique_keys=(("age_id", "steam_id", "name"),),
@@ -250,13 +250,21 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
     ),
     "steam_features": T(
-        domain={"app_id": _c("INTEGER"), "category_id": _c("INTEGER"), "english_name": _c("TEXT")},
+        domain={
+            "app_id": _c("INTEGER"),
+            "category_id": _c("INTEGER"),
+            "english_name": _c("TEXT", True),
+        },
         technical={},
         primary_key=("app_id", "category_id"),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
     ),
     "steam_accessibility_features": T(
-        domain={"app_id": _c("INTEGER"), "category_id": _c("INTEGER"), "english_name": _c("TEXT")},
+        domain={
+            "app_id": _c("INTEGER"),
+            "category_id": _c("INTEGER"),
+            "english_name": _c("TEXT", True),
+        },
         technical={},
         primary_key=("app_id", "category_id"),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
@@ -273,7 +281,6 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "app_id": _c("INTEGER"),
             "eula_id": _c("TEXT", True),
             "name_description": _c("TEXT", True),
-            "steam_link_support": _c("BOOLEAN", True),
             "url": _c("TEXT", True),
             "version": _c("TEXT", True),
         },
@@ -286,6 +293,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         domain={
             "app_id": _c("INTEGER"),
             "controller": _c("TEXT"),
+            "support": _c("BOOLEAN", True),
             "bluetooth": _c("BOOLEAN", True),
             "usb": _c("BOOLEAN", True),
         },
@@ -319,8 +327,12 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "updated_at": _c("DATETIME", True),
             "description": _c("TEXT", True),
             "build_id": _c("INTEGER", True),
-            "download_size": _c("INTEGER", True),
-            "disk_size": _c("INTEGER", True),
+            "download_size_min": _c("INTEGER", True),
+            "download_size_median": _c("INTEGER", True),
+            "download_size_max": _c("INTEGER", True),
+            "disk_size_min": _c("INTEGER", True),
+            "disk_size_median": _c("INTEGER", True),
+            "disk_size_max": _c("INTEGER", True),
         },
         technical={},
         primary_key=("app_id", "name"),
@@ -329,7 +341,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
     "steam_review_language_stats": T(
         domain={
             "app_id": _c("INTEGER"),
-            "language": _c("TEXT", True),
+            "language": _c("TEXT"),
             "total_reviews": _c("INTEGER"),
             "total_negative": _c("INTEGER"),
             "total_positive": _c("INTEGER"),
@@ -337,7 +349,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         },
         technical={"id": _c("INTEGER")},
         primary_key=("id",),
-        unique_keys=(("app_id", "language"), ("app_id",)),
+        unique_keys=(("app_id", "language"),),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
     ),
     "steam_reviews": T(

@@ -53,7 +53,7 @@ def _review_language(value: Any) -> str | None:
         return None
     normalized = value.strip()
     if normalized.casefold() == "all":
-        return None
+        return "*"
     return _REVIEW_LANGUAGES.get(normalized.casefold(), normalized)
 
 
@@ -69,7 +69,7 @@ def parse_summary(
     negative = int(summary.get("total_negative", 0) or 0)
     return RatingSummary(
         locale=locale,
-        review_language=_review_language(review_language),
+        review_language=_review_language(review_language or "all") or "*",
         store_country=store_country,
         score=summary.get("review_score"),
         score_description=summary.get("review_score_desc"),
