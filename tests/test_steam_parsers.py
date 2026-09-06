@@ -257,7 +257,7 @@ def test_app_details_cover_tz_relationships_media_and_metadata() -> None:
     assert parsed["relationship"].app_id == 42
     assert parsed["editions"][0].name == "Example"
     assert parsed["edition_prices"][0].final == 500
-    assert parsed["bundles"][0].edition_package_ids == [10]
+    assert parsed["bundles"][0].edition_package_ids == []
     assert parsed["requirements"].windows.minimum.text == "English"
     assert parsed["deck_support"].status == "supported"
     assert parsed["eulas"][0].model_dump() == {

@@ -30,8 +30,9 @@ async def main() -> None:
         include_games=True,
         include_dlc=True,
         include_software=True,
-        include_videos=True,
-        include_hardware=True,
+        # Video and hardware AppIDs are outside the Steam-game TZ scope.
+        include_videos=False,
+        include_hardware=False,
     )
     print(len(app_ids), app_ids[:10])
 
@@ -109,6 +110,11 @@ Steam — единственный активный parser в pipeline. `steamsp
 достижения. Ветки с паролем не сохраняются. Сбор CCU по ТЗ на этом этапе не
 выполняется.
 
+В Steam-specific mapping для credits намеренно хранится `organization_name`:
+публичный Steam primary source не даёт стабильного `organization_id`, поэтому
+фиктивный ID не создаётся. Разрешение организации в общую entity относится к
+отдельному merge-stage.
+
 ## Конфигурация
 
 Используются только общие переменные окружения:
@@ -123,7 +129,12 @@ SCRAPER_REQUEST_TIMEOUT_SECONDS=35
 SCRAPER_CONNECT_TIMEOUT_SECONDS=15
 SCRAPER_USER_AGENT=game-scraper/1.0
 SCRAPER_REVIEW_MIN_LENGTH_CHARS=200
+STEAM_WEB_API_KEY=...
 ```
+
+`STEAM_WEB_API_KEY` нужен только для structured achievements и global
+achievement percentages; без него achievement scope получает явный diagnostic
+и не считается покрытым.
 
 ## Проверки и демо
 

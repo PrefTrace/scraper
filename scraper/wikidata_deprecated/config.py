@@ -20,6 +20,7 @@ class ScraperConfig:
     request_timeout_seconds: float = 35.0
     connect_timeout_seconds: float = 15.0
     user_agent: str = DEFAULT_USER_AGENT
+    steam_web_api_key: str | None = None
     pcgamingwiki_min_interval_seconds: float = 2.1
     steamspy_min_interval_seconds: float = 1.0
     review_min_length_chars: int = 200
@@ -35,6 +36,7 @@ class ScraperConfig:
             request_timeout_seconds=_env_float("SCRAPER_REQUEST_TIMEOUT_SECONDS", 35.0),
             connect_timeout_seconds=_env_float("SCRAPER_CONNECT_TIMEOUT_SECONDS", 15.0),
             user_agent=_env_value("SCRAPER_USER_AGENT", DEFAULT_USER_AGENT),
+            steam_web_api_key=os.getenv("STEAM_WEB_API_KEY") or None,
             pcgamingwiki_min_interval_seconds=_env_float(
                 "SCRAPER_PCGAMINGWIKI_MIN_INTERVAL_SECONDS",
                 2.1,

@@ -1,0 +1,8 @@
+{
+  "achievementpercentages": {
+    "achievements": [
+      {"name": "ACH_FIRST_STEP", "percent": 73.5},
+      {"name": "ACH_SECRET", "percent": 4.25}
+    ]
+  }
+}

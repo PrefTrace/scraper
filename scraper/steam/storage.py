@@ -14,6 +14,7 @@ from scraper.models import (
     SystemRequirement,
 )
 
+from .locales import normalize_steam_language
 from .orm import (
     SteamAccessibilityFeature,
     SteamAchievement,
@@ -135,8 +136,16 @@ async def persist_steam_scope(
 ) -> None:
     """Persist one typed Steam refresh result into TZ-shaped tables."""
 
-    await _ensure_app(session, app_id)
     kind = scope.split(":", maxsplit=1)[0]
+    if kind == "details" and isinstance(data, dict):
+        # Demos, videos and hardware are discovery noise for this TZ scope.
+        # Remove a previously indexed row as well, but do not create one for
+        # an unsupported detail response in the first place.
+        source_type = data.get("source_type")
+        if source_type not in (None, "") and data.get("type") is None:
+            await remove_all_steam_data(session, app_id)
+            return
+    await _ensure_app(session, app_id)
     if kind == "details":
         await _persist_details(session, app_id, scope, data)
     elif kind == "store":
@@ -217,10 +226,8 @@ async def remove_steam_scope(
         language = _language_from_scope(scope)
         await session.execute(
             delete(SteamAchievementLocalization).where(
+                SteamAchievementLocalization.app_id == app_id,
                 SteamAchievementLocalization.language == language,
-                SteamAchievementLocalization.achievement_id.in_(
-                    select(SteamAchievement.id).where(SteamAchievement.app_id == app_id)
-                ),
             )
         )
     elif kind == "rating":
@@ -285,10 +292,9 @@ async def remove_all_steam_data(session: AsyncSession, app_id: int) -> None:
         SteamExternalReview,
     ):
         await session.execute(delete(model).where(model.app_id == app_id))
-    achievement_ids = select(SteamAchievement.id).where(SteamAchievement.app_id == app_id)
     await session.execute(
         delete(SteamAchievementLocalization).where(
-            SteamAchievementLocalization.achievement_id.in_(achievement_ids)
+            SteamAchievementLocalization.app_id == app_id
         )
     )
     await session.execute(delete(SteamAchievement).where(SteamAchievement.app_id == app_id))
@@ -326,7 +332,7 @@ async def _persist_details(
         app.metacritic_score = metacritic_score
         app.metacritic_url = source_data.get("metacritic_url")
         app.gamepad_preferred = source_data.get("gamepad_preferred")
-        app.controller_support = source_data.get("controller_support")
+        app.controller_support = source_data.get("controller_support_level")
         app.release_date = source_data.get("release_date")
         app.release_date_max = source_data.get("release_date_max")
         app.release_status = source_data.get("release_status")
@@ -610,7 +616,10 @@ async def _persist_store(
         )
     seen_languages: set[str] = set()
     for item in _items(data.get("supported_languages")):
-        language = _field(item, "web_code") or _field(item, "name")
+        language = _field(item, "web_code")
+        if not language:
+            raw_language = _field(item, "steam_language") or _field(item, "name")
+            language = normalize_steam_language(str(raw_language)) if raw_language else None
         if not language or language in seen_languages:
             continue
         seen_languages.add(str(language))
@@ -689,38 +698,25 @@ async def _persist_achievements(
     language = _language_from_scope(scope)
     seen: set[str] = set()
     for item in _items(values):
-        key = _field(item, "api_name")
-        achievement_id = _field(item, "steam_id")
+        key = _field(item, "achievement_id", _field(item, "api_name"))
         name = _field(item, "name")
-        if not key and achievement_id is not None:
-            key = str(achievement_id)
         if not key or key in seen:
             continue
         seen.add(str(key))
-        achievement = await session.scalar(
-            select(SteamAchievement).where(
-                SteamAchievement.app_id == app_id,
-                SteamAchievement.api_name == str(key),
-            )
-        )
+        achievement = await session.get(SteamAchievement, (app_id, str(key)))
         if achievement is None:
-            achievement = SteamAchievement(app_id=app_id, api_name=str(key))
+            achievement = SteamAchievement(app_id=app_id, achievement_id=str(key))
             session.add(achievement)
-        achievement.achievement_id = str(achievement_id) if achievement_id is not None else None
-        achievement.api_name = str(key)
         achievement.icon_url = _field(item, "icon_url")
         achievement.global_percent = _field(item, "global_percent")
         achievement.hidden = _field(item, "hidden")
-        await session.flush()
-        localization = await session.scalar(
-            select(SteamAchievementLocalization).where(
-                SteamAchievementLocalization.achievement_id == achievement.id,
-                SteamAchievementLocalization.language == language,
-            )
+        localization = await session.get(
+            SteamAchievementLocalization, (app_id, str(key), language)
         )
         if localization is None:
             localization = SteamAchievementLocalization(
-                achievement_id=achievement.id,
+                app_id=app_id,
+                achievement_id=str(key),
                 language=language,
                 name=str(name or ""),
             )

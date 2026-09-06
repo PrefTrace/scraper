@@ -92,6 +92,39 @@ class SteamClient:
         )
         return response.text
 
+    async def achievement_schema(
+        self,
+        app_id: int,
+        *,
+        api_key: str,
+        language: str,
+    ) -> dict[str, Any]:
+        response = await self._get(
+            "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/",
+            params={"key": api_key, "appid": app_id, "l": language},
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SteamClientError(f"Unexpected Steam achievement schema for app {app_id}")
+        return payload
+
+    async def global_achievement_percentages(
+        self,
+        app_id: int,
+        *,
+        api_key: str,
+    ) -> dict[str, Any]:
+        response = await self._get(
+            "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/",
+            params={"key": api_key, "gameid": app_id},
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SteamClientError(
+                f"Unexpected Steam global achievement percentages for app {app_id}"
+            )
+        return payload
+
     async def store_app_list_page(
         self,
         *,
@@ -101,8 +134,8 @@ class SteamClient:
         include_games: bool = True,
         include_dlc: bool = True,
         include_software: bool = True,
-        include_videos: bool = True,
-        include_hardware: bool = True,
+        include_videos: bool = False,
+        include_hardware: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "key": api_key,
@@ -178,11 +211,13 @@ class SteamClient:
         locale: LocaleInfo,
         *,
         store_country: str | None = None,
+        bundle_id: int | None = None,
     ) -> dict[str, Any]:
         """Fetch public structured StoreBrowse purchase/media data."""
 
+        ids = [{"bundleid": bundle_id}] if bundle_id is not None else [{"appid": app_id}]
         input_json = {
-            "ids": [{"appid": app_id}],
+            "ids": ids,
             "context": {
                 "language": locale.steam_language,
                 "country_code": store_country or "US",
@@ -198,6 +233,7 @@ class SteamClient:
                 "include_basic_info": True,
                 "include_supported_languages": True,
                 "include_included_items": True,
+                "include_links": True,
             },
         }
         response = await self._get(

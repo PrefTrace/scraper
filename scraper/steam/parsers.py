@@ -46,44 +46,12 @@ from scraper.models import (
     ThirdPartyEula,
 )
 
-from .locales import LocaleInfo, canonicalize_language_name
-
-_STEAM_LANGUAGE_NAMES: dict[str, tuple[str, str]] = {
-    "arabic": ("ar", "arabic"),
-    "bulgarian": ("bg", "bulgarian"),
-    "czech": ("cs", "czech"),
-    "danish": ("da", "danish"),
-    "dutch": ("nl", "dutch"),
-    "english": ("en", "english"),
-    "finnish": ("fi", "finnish"),
-    "french": ("fr", "french"),
-    "german": ("de", "german"),
-    "greek": ("el", "greek"),
-    "hungarian": ("hu", "hungarian"),
-    "indonesian": ("id", "indonesian"),
-    "italian": ("it", "italian"),
-    "japanese": ("ja", "japanese"),
-    "korean": ("ko", "koreana"),
-    "koreana": ("ko", "koreana"),
-    "malay": ("ms", "malay"),
-    "norwegian": ("no", "norwegian"),
-    "polish": ("pl", "polish"),
-    "portuguese - portugal": ("pt", "portuguese"),
-    "portuguese - brazil": ("pt-BR", "brazilian"),
-    "brazilian": ("pt-BR", "brazilian"),
-    "romanian": ("ro", "romanian"),
-    "russian": ("ru", "russian"),
-    "simplified chinese": ("zh-CN", "schinese"),
-    "schinese": ("zh-CN", "schinese"),
-    "spanish - spain": ("es", "spanish"),
-    "spanish - latin america": ("es-419", "latam"),
-    "swedish": ("sv", "swedish"),
-    "thai": ("th", "thai"),
-    "traditional chinese": ("zh-TW", "tchinese"),
-    "turkish": ("tr", "turkish"),
-    "ukrainian": ("uk", "ukrainian"),
-    "vietnamese": ("vi", "vietnamese"),
-}
+from .locales import (
+    LocaleInfo,
+    canonicalize_language_name,
+    steam_code_to_bcp47,
+    steam_name_to_code,
+)
 
 _CONTENT_DESCRIPTOR_NAMES = {
     1: "Some Nudity or Sexual Content",
@@ -102,6 +70,28 @@ _MEDIA_KEY_TYPES = {
     "vertical_capsule": "vertical_capsule",
     "background": "page_background",
     "background_raw": "page_background",
+}
+
+# The three legacy ``capsule_image*`` fields are alternate resolutions of the
+# same store Main Capsule, not three domain media classes.  Prefer the newest
+# field when it exists and emit one canonical row for that source asset class.
+_LEGACY_ASSET_PRIORITY = (
+    "capsule_imagev6",
+    "capsule_imagev5",
+    "capsule_image",
+)
+
+_STORE_ASSET_TYPES = {
+    "header": "header_capsule",
+    "main_capsule": "main_capsule",
+    "small_capsule": "small_capsule",
+    "vertical_capsule": "vertical_capsule",
+    "page_background": "page_background",
+    "library_capsule": "library_capsule",
+    "library_hero": "library_hero",
+    "library_header": "library_header",
+    "library_logo": "library_logo",
+    "hero_capsule": "library_hero",
 }
 
 _CANONICAL_MEDIA_TYPES = {
@@ -144,9 +134,6 @@ _STEAM_TYPE_MAP = {
     "soundtrack": "soundtrack",
     "software": "application",
     "application": "application",
-    "video": "video",
-    "hardware": "hardware",
-    "demo": "demo",
 }
 
 _STEAM_CATEGORY_NAMES = {
@@ -179,7 +166,7 @@ def normalize_steam_type(value: Any) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     normalized = value.strip().casefold()
-    return _STEAM_TYPE_MAP.get(normalized, normalized)
+    return _STEAM_TYPE_MAP.get(normalized)
 
 
 def _node_text(node: Node | None) -> str:
@@ -275,7 +262,7 @@ def _social_link_type(url: str, label: str = "") -> str:
     known_hosts = (
         ("facebook.", "facebook"),
         ("twitter.", "twitter"),
-        ("x.com", "x"),
+        ("x.com", "twitter"),
         ("discord.", "discord"),
         ("youtube.", "youtube"),
         ("twitch.", "twitch"),
@@ -354,15 +341,31 @@ def _release_status(data: dict[str, Any], coming_soon: bool | None) -> str:
         normalized = raw_status.casefold().replace("-", "_").replace(" ", "_")
         if normalized in {"removed", "retired", "unavailable", "delisted"}:
             return "removed"
-        if normalized in {"preorder", "pre_order"}:
-            return "preorder"
+        if normalized in {"advanced_access", "advancedaccess", "prerelease", "pre_release"}:
+            return "advanced_access"
         if normalized in {"early_access", "earlyaccess"}:
             return "early_access"
+        if normalized in {"preorder", "pre_order"}:
+            return "not_released"
     if _parse_bool(data.get("is_early_access")) or _parse_bool(data.get("early_access")):
         return "early_access"
+    if _parse_bool(data.get("is_advanced_access")) or _parse_bool(
+        data.get("advanced_access")
+    ):
+        return "advanced_access"
+    # A preorder is a purchase state, not the TZ release state.
     if _parse_bool(data.get("is_preorder")) or _parse_bool(data.get("preorder")):
-        return "preorder"
+        return "not_released"
     return "not_released" if coming_soon is True else "released"
+
+
+def normalize_release_status(data: dict[str, Any] | None) -> str:
+    """Normalize structured Steam release signals to the TZ literals."""
+
+    if not isinstance(data, dict):
+        return "released"
+    _minimum, _maximum, _raw, coming_soon = parse_release_window(data.get("release_date"))
+    return _release_status(data, coming_soon)
 
 
 def _controller_support_level(value: Any) -> str | None:
@@ -428,8 +431,9 @@ def parse_price(data: Any) -> PriceOverview | None:
 
 
 def _language(value: str) -> tuple[str | None, str | None]:
-    match = _STEAM_LANGUAGE_NAMES.get(canonicalize_language_name(value))
-    return match if match else (None, None)
+    code = steam_name_to_code(value) or canonicalize_language_name(value)
+    bcp47 = steam_code_to_bcp47(code)
+    return (bcp47, code) if bcp47 else (None, None)
 
 
 def parse_languages_fallback(value: str | None) -> list[LanguageSupport]:
@@ -524,16 +528,61 @@ def _achievement_from_data(
     name = raw.get("name") or raw.get("displayName") or raw.get("display_name")
     if not isinstance(name, str) or not name.strip():
         return None
+    achievement_id = raw.get("achievement_id", raw.get("apiname"))
+    if not isinstance(achievement_id, str) or not achievement_id.strip():
+        return None
     return Achievement(
-        api_name=(str(raw["apiname"]) if raw.get("apiname") is not None else None),
+        achievement_id=achievement_id.strip(),
         name=name.strip(),
         description=(str(raw["description"]) if raw.get("description") is not None else None),
         global_percent=_parse_float(raw.get("global_percent", raw.get("percent"))),
         hidden=_parse_bool(raw.get("hidden")),
         icon_url=_optional_url(raw.get("icon") or raw.get("icon_url")),
         language=language,
-        steam_id=_parse_int(raw.get("id", raw.get("achievementid"))),
     )
+
+
+def parse_achievement_schema(
+    data: dict[str, Any] | None,
+    *,
+    language: str | None = None,
+    percentages: dict[str, float] | None = None,
+) -> list[Achievement]:
+    """Parse the structured ISteamUserStats schema response."""
+
+    if not isinstance(data, dict):
+        return []
+    game = data.get("game")
+    stats = game.get("availableGameStats") if isinstance(game, dict) else None
+    raw_achievements = stats.get("achievements") if isinstance(stats, dict) else None
+    result: list[Achievement] = []
+    for raw in _as_list(raw_achievements):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        item["achievement_id"] = raw.get("name")
+        item["name"] = raw.get("displayName", raw.get("display_name"))
+        item["global_percent"] = (percentages or {}).get(str(raw.get("name")))
+        item["icon_url"] = raw.get("icon")
+        achievement = _achievement_from_data(item, language=language)
+        if achievement is not None:
+            result.append(achievement)
+    return result
+
+
+def parse_global_achievement_percentages(data: dict[str, Any] | None) -> dict[str, float]:
+    if not isinstance(data, dict):
+        return {}
+    values = data.get("achievementpercentages")
+    raw_achievements = values.get("achievements") if isinstance(values, dict) else None
+    result: dict[str, float] = {}
+    for raw in _as_list(raw_achievements):
+        if not isinstance(raw, dict) or raw.get("name") is None:
+            continue
+        percent = _parse_float(raw.get("percent"))
+        if percent is not None:
+            result[str(raw["name"])] = percent
+    return result
 
 
 def parse_app_achievements(
@@ -547,7 +596,7 @@ def parse_app_achievements(
         if not isinstance(raw, dict):
             continue
         item = dict(raw)
-        api_name = item.get("apiname")
+        api_name = item.get("achievement_id", item.get("apiname"))
         if (
             isinstance(percentages, dict)
             and api_name in percentages
@@ -572,20 +621,16 @@ def parse_achievements(html: str, *, language: str | None = None) -> list[Achiev
         percent_match = re.search(r"(\d+(?:\.\d+)?)", percent_text)
         icon = row.css_first(".achieveImgHolder img")
         class_name = row.attributes.get("class") or ""
-        achievement_id = row.attributes.get("data-achievementid") or row.attributes.get(
-            "data-achievement-id"
-        )
         api_name = row.attributes.get("data-apiname") or row.attributes.get("data-achievement")
         result.append(
             Achievement(
-                api_name=api_name,
+                achievement_id=str(api_name) if api_name is not None else None,
                 name=name,
                 description=description,
                 global_percent=float(percent_match.group(1)) if percent_match else None,
                 hidden="hidden" in class_name.casefold(),
                 icon_url=_optional_url(icon.attributes.get("src") if icon else None),
                 language=language,
-                steam_id=_parse_int(achievement_id),
             )
         )
     return result
@@ -614,9 +659,28 @@ def parse_media(
             )
         )
 
+    emitted_legacy_types: set[str] = set()
+    legacy_keys = set(_LEGACY_ASSET_PRIORITY)
     for key, media_type in _MEDIA_KEY_TYPES.items():
+        if key in legacy_keys:
+            continue
         url = _optional_url(data.get(key))
         if url:
+            result.append(
+                MediaImage(
+                    media_type=media_type,
+                    type=media_type,
+                    url=url,
+                    full_url=url,
+                    format=_format_from_url(url),
+                    language=language,
+                )
+            )
+    for key in _LEGACY_ASSET_PRIORITY:
+        media_type = _MEDIA_KEY_TYPES[key]
+        url = _optional_url(data.get(key))
+        if url and media_type not in emitted_legacy_types:
+            emitted_legacy_types.add(media_type)
             result.append(
                 MediaImage(
                     media_type=media_type,
@@ -637,7 +701,7 @@ def parse_media(
                 )
             else:
                 url = _optional_url(raw)
-            canonical_type = _canonical_media_type(key)
+            canonical_type = _STORE_ASSET_TYPES.get(key) or _canonical_media_type(key)
             if url and canonical_type:
                 result.append(
                     MediaImage(
@@ -661,7 +725,7 @@ def parse_media(
                 raw_url = asset_format.replace("${FILENAME}", raw_url)
                 raw_url = f"https://cdn.akamai.steamstatic.com/{raw_url}"
             url = _optional_url(raw_url)
-            canonical_type = _canonical_media_type(key)
+            canonical_type = _STORE_ASSET_TYPES.get(key) or _canonical_media_type(key)
             if url and canonical_type:
                 result.append(
                     MediaImage(
@@ -780,7 +844,9 @@ def _edition_name(group: dict[str, Any], item: dict[str, Any]) -> str | None:
     return None
 
 
-def parse_editions(data: dict[str, Any]) -> tuple[list[int], list[EditionInfo], list[EditionPrice]]:
+def parse_editions(
+    data: dict[str, Any], *, price_region: str | None = None
+) -> tuple[list[int], list[EditionInfo], list[EditionPrice]]:
     package_ids: list[int] = []
     editions: list[EditionInfo] = []
     prices: list[EditionPrice] = []
@@ -830,12 +896,15 @@ def parse_editions(data: dict[str, Any]) -> tuple[list[int], list[EditionInfo], 
                     str(recurring["period"]) if recurring.get("period") is not None else None
                 ),
                 period_units=_parse_int(recurring.get("frequency", recurring.get("period_units"))),
+                price_region=price_region,
             )
         )
     return package_ids, editions, prices
 
 
-def parse_bundles(data: dict[str, Any]) -> tuple[list[Bundle], list[BundlePrice]]:
+def parse_bundles(
+    data: dict[str, Any], *, price_region: str | None = None
+) -> tuple[list[Bundle], list[BundlePrice]]:
     bundles: list[Bundle] = []
     prices: list[BundlePrice] = []
     for raw in _as_list(data.get("bundles")):
@@ -844,23 +913,17 @@ def parse_bundles(data: dict[str, Any]) -> tuple[list[Bundle], list[BundlePrice]
         bundle_id = _parse_int(raw.get("bundleid", raw.get("bundle_id", raw.get("id"))))
         if bundle_id is None:
             continue
-        edition_ids: list[int] = []
-        for item in _as_list(raw.get("items")) + _as_list(raw.get("item_ids")):
-            raw_id = (
-                item.get("packageid", item.get("package_id", item.get("id")))
-                if isinstance(item, dict)
-                else item
-            )
-            parsed_id = _parse_int(raw_id)
-            if parsed_id is not None:
-                edition_ids.append(parsed_id)
         bundles.append(
             Bundle(
                 bundle_id=bundle_id,
                 name=raw.get("name") if isinstance(raw.get("name"), str) else None,
                 discount_percent=_parse_int(raw.get("discount_pct", raw.get("discount_percent"))),
                 must_purchase_as_set=_parse_bool(raw.get("must_purchase_as_set")),
-                edition_package_ids=list(dict.fromkeys(edition_ids)),
+                # Membership is intentionally absent here.  AppDetails and
+                # app-level StoreBrowse data do not identify the contents of
+                # each bundle reliably; only a bundle-specific response may
+                # populate this relation.
+                edition_package_ids=[],
             )
         )
         initial = _parse_int(raw.get("price_before_discount", raw.get("initial")))
@@ -873,6 +936,7 @@ def parse_bundles(data: dict[str, Any]) -> tuple[list[Bundle], list[BundlePrice]
                 ),
                 initial=initial,
                 final=final,
+                price_region=price_region,
             )
         )
     return bundles, prices
@@ -909,6 +973,23 @@ def parse_external_links(data: dict[str, Any], html: str | None = None) -> list[
         if not isinstance(raw, dict):
             continue
         link = _link(_link_type(str(raw.get("type", "external"))), raw)
+        if link:
+            result.append(link)
+    structured_link_types = {
+        1: "youtube",
+        2: "facebook",
+        3: "twitter",
+        4: "twitch",
+        5: "discord",
+    }
+    for raw in _as_list(data.get("links")):
+        if not isinstance(raw, dict):
+            continue
+        raw_link_type = _parse_int(raw.get("link_type"))
+        link_type = structured_link_types.get(raw_link_type) if raw_link_type is not None else None
+        if link_type is None:
+            link_type = _link_type(str(raw.get("type", "external")))
+        link = _link(link_type, raw)
         if link:
             result.append(link)
     social_values = data.get("social_media")
@@ -1426,6 +1507,7 @@ def parse_store_browse_item(
     payload: dict[str, Any] | None,
     *,
     price_region: str | None = None,
+    bundle_memberships: dict[int, list[int]] | None = None,
 ) -> dict[str, Any]:
     """Normalize the public IStoreBrowseService purchase response."""
 
@@ -1483,17 +1565,7 @@ def parse_store_browse_item(
                 )
             )
         if bundle_id is not None:
-            included_ids: list[int] = []
-            included = item.get("included_items")
-            if isinstance(included, dict):
-                for included_app in _as_list(included.get("included_apps")):
-                    if not isinstance(included_app, dict):
-                        continue
-                    included_package = _parse_int(
-                        (included_app.get("best_purchase_option") or {}).get("packageid")
-                    )
-                    if included_package is not None:
-                        included_ids.append(included_package)
+            included_ids = list((bundle_memberships or {}).get(bundle_id, []))
             bundles.append(
                 Bundle(
                     bundle_id=bundle_id,
@@ -1519,7 +1591,33 @@ def parse_store_browse_item(
         "bundle_prices": bundle_prices,
         "media": parse_media(item, language="en"),
         "supported_languages": parse_store_browse_languages(item.get("supported_languages")),
+        "external_links": parse_external_links({"links": item.get("links")}),
     }
+
+
+def parse_bundle_membership(payload: dict[str, Any] | None) -> tuple[int | None, list[int]]:
+    """Read package membership only from a bundle-specific StoreBrowse item."""
+
+    if not isinstance(payload, dict):
+        return None, []
+    item = payload
+    response = payload.get("response")
+    if isinstance(response, dict):
+        values = response.get("store_items") or response.get("items")
+        if isinstance(values, list) and values and isinstance(values[0], dict):
+            item = values[0]
+    bundle_id = _parse_int(item.get("id", item.get("bundleid")))
+    included = item.get("included_items")
+    if not isinstance(included, dict):
+        return bundle_id, []
+    package_ids: list[int] = []
+    for raw in _as_list(included.get("included_packages")):
+        if not isinstance(raw, dict):
+            continue
+        package_id = _parse_int((raw.get("best_purchase_option") or {}).get("packageid"))
+        if package_id is not None:
+            package_ids.append(package_id)
+    return bundle_id, list(dict.fromkeys(package_ids))
 
 
 def parse_store_browse_languages(value: Any) -> list[LanguageSupport]:
@@ -1622,8 +1720,20 @@ def parse_app_details(
 ) -> dict[str, Any]:
     data = merge_app_info(data, app_info)
     browse_data: dict[str, Any] = {}
+    price_overview = data.get("price_overview")
+    price_region = (
+        str(price_overview.get("currency")).strip().upper()
+        if isinstance(price_overview, dict) and price_overview.get("currency")
+        else None
+    )
     if store_browse:
-        browse = parse_store_browse_item(store_browse)
+        browse = parse_store_browse_item(
+            store_browse,
+            price_region=price_region,
+            bundle_memberships=store_browse.get("_bundle_memberships")
+            if isinstance(store_browse, dict)
+            else None,
+        )
         browse_data = browse
         for key in ("editions", "edition_prices", "bundles", "bundle_prices"):
             if browse.get(key):
@@ -1633,8 +1743,8 @@ def parse_app_details(
         data.get("release_date")
     )
     requirements_source = requirements_data if requirements_data is not None else data
-    package_ids, editions, edition_prices = parse_editions(data)
-    bundles, bundle_prices = parse_bundles(data)
+    package_ids, editions, edition_prices = parse_editions(data, price_region=price_region)
+    bundles, bundle_prices = parse_bundles(data, price_region=price_region)
     if browse_data.get("editions"):
         editions = browse_data["editions"]
         edition_prices = browse_data.get("edition_prices", [])
@@ -1662,9 +1772,7 @@ def parse_app_details(
     dlc_ids = [_parse_int(item) for item in _as_list(data.get("dlc"))]
     media = parse_media(data, language=locale.requested)
     if store_browse:
-        media.extend(
-            parse_store_browse_item(store_browse).get("media", [])
-        )
+        media.extend(browse_data.get("media", []))
     screenshots = [
         item for item in media if isinstance(item, MediaImage) and item.media_type == "screenshot"
     ]
@@ -1710,6 +1818,7 @@ def parse_app_details(
             legal_notice=text_value(data.get("legal_notice")),
         ),
         "type": normalize_steam_type(data.get("type")),
+        "source_type": data.get("type"),
         "app_id": app_id,
         "is_free": _parse_bool(data.get("is_free")),
         "vac_enabled": _parse_bool(data.get("vac_enabled")),
@@ -1781,7 +1890,8 @@ def parse_app_details(
         "package_ids": package_ids,
         "bundles": bundles,
         "bundle_prices": bundle_prices,
-        "external_links": parse_external_links(data, store_html),
+        "external_links": parse_external_links(data, store_html)
+        + list(browse_data.get("external_links", [])),
         "deck_support": deck_support,
         "steam_deck": deck_support,
         "eulas": eulas,
@@ -1813,10 +1923,12 @@ def parse_app_details(
 __all__ = [
     "parse_accessibility_features",
     "parse_achievements",
+    "parse_achievement_schema",
     "parse_age_ratings",
     "parse_app_achievements",
     "parse_app_details",
     "parse_bundles",
+    "parse_bundle_membership",
     "parse_build_branches",
     "parse_controllers",
     "parse_descriptors",
@@ -1833,6 +1945,7 @@ __all__ = [
     "parse_price",
     "parse_release_date",
     "parse_release_window",
+    "normalize_release_status",
     "parse_requirements",
     "parse_review_language_stats",
     "parse_appinfo_category_ids",

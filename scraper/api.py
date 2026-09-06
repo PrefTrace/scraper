@@ -13,8 +13,8 @@ async def get_app_ids(
     include_games: bool = True,
     include_dlc: bool = True,
     include_software: bool = True,
-    include_videos: bool = True,
-    include_hardware: bool = True,
+    include_videos: bool = False,
+    include_hardware: bool = False,
 ) -> list[int]:
     """Return unique Steam AppIDs from the existing official paginated catalog flow."""
 

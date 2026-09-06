@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from sqlalchemy import select
 
@@ -28,7 +31,12 @@ from scraper.steam.orm import (
     SteamSupportedLanguage,
     SteamSystemRequirement,
 )
-from scraper.steam.parsers import parse_app_details, parse_build_branches
+from scraper.steam.parsers import (
+    parse_achievement_schema,
+    parse_app_details,
+    parse_build_branches,
+    parse_global_achievement_percentages,
+)
 from scraper.steam.storage import persist_steam_scope, remove_steam_scope
 from scraper.wikidata_deprecated.config import ScraperConfig
 from scraper.wikidata_deprecated.orm import ScraperDatabase, SourceFact
@@ -69,7 +77,6 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
                     {
                         "bundleid": 20,
                         "name": "Bundle",
-                        "item_ids": [10],
                         "currency": "USD",
                         "price": 900,
                     }
@@ -94,6 +101,16 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
             normalize_locale("en-US"),
             app_id=42,
             store_country="kz",
+            store_browse={
+                "purchase_options": [
+                    {
+                        "bundleid": 20,
+                        "purchase_option_name": "Bundle",
+                        "final_price_in_cents": 900,
+                    }
+                ],
+                "_bundle_memberships": {20: [10]},
+            },
         )
         async with database.session() as session:
             await persist_steam_scope(session, 42, "details:en-US:kz", parsed)
@@ -162,5 +179,93 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
             await session.commit()
             assert await session.get(SteamApp, 42)
             assert await session.get(SteamEdition, 10)
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_steam_types_are_not_indexed(tmp_path) -> None:
+    database = ScraperDatabase(
+        ScraperConfig(
+            database_url=f"sqlite+aiosqlite:///{(tmp_path / 'unsupported.sqlite3').as_posix()}"
+        )
+    )
+    try:
+        await database.create_schema()
+        parsed = parse_app_details(
+            {"name": "Demo", "type": "demo", "release_date": {"coming_soon": False}},
+            normalize_locale("en-US"),
+            app_id=530620,
+        )
+        assert parsed["type"] is None
+        async with database.session() as session:
+            await persist_steam_scope(session, 530620, "details:en-US:kz", parsed)
+            await session.commit()
+            assert await session.get(SteamApp, 530620) is None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_supported_steam_types_persist_end_to_end(tmp_path) -> None:
+    database = ScraperDatabase(
+        ScraperConfig(database_url=f"sqlite+aiosqlite:///{(tmp_path / 'types.sqlite3').as_posix()}")
+    )
+    try:
+        await database.create_schema()
+        raw_types = {101: "Game", 102: "Software", 103: "DLC", 104: "Music"}
+        async with database.session() as session:
+            for app_id, raw_type in raw_types.items():
+                parsed = parse_app_details(
+                    {"name": raw_type, "type": raw_type},
+                    normalize_locale("en-US"),
+                    app_id=app_id,
+                )
+                await persist_steam_scope(session, app_id, "details:en-US:kz", parsed)
+            await session.commit()
+            apps = (await session.scalars(select(SteamApp))).all()
+        assert {app.type for app in apps} == {"game", "application", "dlc", "soundtrack"}
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_structured_achievement_snapshots_persist_one_base_row_and_two_locales(
+    tmp_path,
+) -> None:
+    database = ScraperDatabase(
+        ScraperConfig(
+            database_url=f"sqlite+aiosqlite:///{(tmp_path / 'achievements.sqlite3').as_posix()}"
+        )
+    )
+    fixture_dir = Path(__file__).parent / "fixtures" / "steam"
+    try:
+        await database.create_schema()
+        percentages = parse_global_achievement_percentages(
+            json.loads((fixture_dir / "achievement_percentages.json").read_text(encoding="utf-8"))
+        )
+        async with database.session() as session:
+            for locale, filename in (
+                ("en-US", "achievement_schema_en.json"),
+                ("ru-RU", "achievement_schema_ru.json"),
+            ):
+                achievements = parse_achievement_schema(
+                    json.loads((fixture_dir / filename).read_text(encoding="utf-8")),
+                    language=locale,
+                    percentages=percentages,
+                )
+                await persist_steam_scope(
+                    session,
+                    9001,
+                    f"achievements:{locale}",
+                    {"achievements": achievements},
+                )
+            await session.commit()
+            base_rows = (await session.scalars(select(SteamAchievement))).all()
+            localizations = (await session.scalars(select(SteamAchievementLocalization))).all()
+        assert len(base_rows) == 2
+        assert {row.achievement_id for row in base_rows} == {"ACH_FIRST_STEP", "ACH_SECRET"}
+        assert len(localizations) == 4
+        assert {row.language for row in localizations} == {"en-US", "ru-RU"}
     finally:
         await database.dispose()

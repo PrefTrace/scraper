@@ -97,8 +97,8 @@ async def fetch_app_ids(
     include_games: bool = True,
     include_dlc: bool = True,
     include_software: bool = True,
-    include_videos: bool = True,
-    include_hardware: bool = True,
+    include_videos: bool = False,
+    include_hardware: bool = False,
 ) -> list[int]:
     if max_app_ids is not None and max_app_ids < 1:
         raise ValueError("max_app_ids must be positive")

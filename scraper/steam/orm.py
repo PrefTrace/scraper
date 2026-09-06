@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -254,6 +255,9 @@ class SteamController(Base):
 
 class SteamOrganizationCredit(Base):
     __tablename__ = "steam_organization_credits"
+    __table_args__ = (
+        UniqueConstraint("app_id", "status", "organization_name", name="uq_steam_org_credit"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
@@ -314,6 +318,9 @@ class SteamReviewLanguageStat(Base):
 
 class SteamReview(Base):
     __tablename__ = "steam_reviews"
+    __table_args__ = (
+        UniqueConstraint("app_id", "recommendation_id", name="uq_steam_review_source"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
@@ -360,16 +367,11 @@ class SteamExternalReview(Base):
 class SteamAchievement(Base):
     __tablename__ = "steam_achievements"
     __table_args__ = (
-        UniqueConstraint("app_id", "api_name", name="uq_steam_achievement_api_name"),
+        ForeignKeyConstraint(["app_id"], ["steam_apps.app_id"], ondelete="CASCADE"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    app_id: Mapped[int] = mapped_column(
-        ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
-    )
-    # Steam's stable achievement identifier is normally the string apiname.
-    api_name: Mapped[str] = mapped_column(String(256))
-    achievement_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    app_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    achievement_id: Mapped[str] = mapped_column(String(256), primary_key=True)
     icon_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     global_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     hidden: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -379,15 +381,18 @@ class SteamAchievementLocalization(Base):
     __tablename__ = "steam_achievement_localizations"
     __table_args__ = (
         UniqueConstraint(
-            "achievement_id", "language", name="uq_steam_achievement_localization"
+            "app_id", "achievement_id", "language", name="uq_steam_achievement_localization"
+        ),
+        ForeignKeyConstraint(
+            ["app_id", "achievement_id"],
+            ["steam_achievements.app_id", "steam_achievements.achievement_id"],
+            ondelete="CASCADE",
         ),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    achievement_id: Mapped[int] = mapped_column(
-        ForeignKey("steam_achievements.id", ondelete="CASCADE"), index=True
-    )
-    language: Mapped[str] = mapped_column(String(16))
+    app_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    achievement_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    language: Mapped[str] = mapped_column(String(16), primary_key=True)
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

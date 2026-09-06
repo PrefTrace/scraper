@@ -1,0 +1,22 @@
+{
+  "game": {
+    "availableGameStats": {
+      "achievements": [
+        {
+          "name": "ACH_FIRST_STEP",
+          "displayName": "Первый шаг",
+          "description": "Начните игру",
+          "icon": "https://cdn.example/first.jpg",
+          "hidden": 0
+        },
+        {
+          "name": "ACH_SECRET",
+          "displayName": "Тайный путь",
+          "description": "Найдите скрытый путь",
+          "icon": "https://cdn.example/secret.jpg",
+          "hidden": 1
+        }
+      ]
+    }
+  }
+}

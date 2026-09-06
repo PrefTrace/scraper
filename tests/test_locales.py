@@ -1,6 +1,13 @@
 import pytest
 
-from scraper.steam.locales import normalize_locale, normalize_locales, normalize_store_country
+from scraper.steam.locales import (
+    normalize_locale,
+    normalize_locales,
+    normalize_steam_language,
+    normalize_store_country,
+    steam_code_to_bcp47,
+    steam_name_to_code,
+)
 
 
 def test_locale_mapping_supports_regions() -> None:
@@ -28,3 +35,17 @@ def test_locales_are_deduplicated() -> None:
 def test_invalid_locale_is_rejected() -> None:
     with pytest.raises(ValueError):
         normalize_locale("xx-XX")
+
+
+def test_steam_language_mapping_keeps_code_and_display_name_directions_separate() -> None:
+    assert steam_code_to_bcp47("spanish") == "es"
+    assert steam_code_to_bcp47("latam") == "es-419"
+    assert steam_code_to_bcp47("portuguese") == "pt"
+    assert steam_code_to_bcp47("tchinese") == "zh-TW"
+    assert steam_code_to_bcp47("schinese") == "zh-CN"
+    assert steam_code_to_bcp47("brazilian") == "pt-BR"
+    assert steam_code_to_bcp47("koreana") == "ko"
+    assert steam_name_to_code("Spanish - Latin America") == "latam"
+    assert steam_name_to_code("Portuguese - Brazil") == "brazilian"
+    assert normalize_steam_language("Traditional Chinese") == "zh-TW"
+    assert normalize_steam_language("unknown-steam-language") is None

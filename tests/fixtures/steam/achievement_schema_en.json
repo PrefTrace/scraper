@@ -1,0 +1,22 @@
+{
+  "game": {
+    "availableGameStats": {
+      "achievements": [
+        {
+          "name": "ACH_FIRST_STEP",
+          "displayName": "First Step",
+          "description": "Start the game",
+          "icon": "https://cdn.example/first.jpg",
+          "hidden": 0
+        },
+        {
+          "name": "ACH_SECRET",
+          "displayName": "Secret Path",
+          "description": "Find the hidden path",
+          "icon": "https://cdn.example/secret.jpg",
+          "hidden": 1
+        }
+      ]
+    }
+  }
+}

@@ -288,14 +288,19 @@ class ReviewCollection(Model):
 
 
 class Achievement(Model):
-    api_name: str | None = None
+    achievement_id: str | None = None
     name: str
     description: str | None = None
     global_percent: float | None = None
     hidden: bool | None = None
     icon_url: str | None = None
     language: str | None = None
-    steam_id: int | None = None
+
+    @property
+    def api_name(self) -> str | None:
+        """Compatibility alias for the Steam schema's single source ID."""
+
+        return self.achievement_id
 
 
 class HltbData(Model):
