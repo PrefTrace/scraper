@@ -30,8 +30,8 @@ from scraper.steam.orm import (
 )
 from scraper.steam.parsers import parse_app_details, parse_build_branches
 from scraper.steam.storage import persist_steam_scope, remove_steam_scope
-from scraper.wikidata.config import ScraperConfig
-from scraper.wikidata.orm import ScraperDatabase, SourceFact
+from scraper.wikidata_deprecated.config import ScraperConfig
+from scraper.wikidata_deprecated.orm import ScraperDatabase, SourceFact
 
 
 @pytest.mark.asyncio
@@ -82,8 +82,9 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
                 ],
                 "achievements": [
                     {
-                        "name": "FIRST",
-                        "displayName": "First",
+                            "name": "First",
+                            "apiname": "FIRST",
+                            "displayName": "First",
                         "description": "Start",
                         "percent": 50,
                     }
@@ -138,10 +139,10 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
             assert (await session.scalars(select(SteamMedia))).all()
             assert await session.get(SteamEdition, 10)
             assert await session.get(SteamAppEdition, (42, 10))
-            assert await session.get(SteamEditionPrice, (10, "KZ"))
+            assert await session.get(SteamEditionPrice, (10, ""))
             assert await session.get(SteamBundle, 20)
             assert await session.get(SteamBundleEdition, (20, 10))
-            assert await session.get(SteamBundlePrice, (20, "KZ"))
+            assert await session.get(SteamBundlePrice, (20, ""))
             assert (await session.scalars(select(SteamFeature))).all()
             assert (await session.scalars(select(SteamAgeRating))).all()
             assert (await session.scalars(select(SteamDescriptor))).all()

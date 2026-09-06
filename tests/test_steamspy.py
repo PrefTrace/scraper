@@ -6,8 +6,8 @@ from sqlalchemy import select
 
 from scraper.sources.steamspy_deprecated import SteamSpySyncService
 from scraper.steamspy_deprecated.client import STEAMSPY_API_URL, parse_stats
-from scraper.wikidata.config import ScraperConfig
-from scraper.wikidata.orm import ScraperDatabase, SourceFact
+from scraper.wikidata_deprecated.config import ScraperConfig
+from scraper.wikidata_deprecated.orm import ScraperDatabase, SourceFact
 
 PAYLOAD = {
     "appid": 620,

@@ -6,8 +6,8 @@ from scraper.models import HltbData
 from scraper.sources.hltb_deprecated import HltbSyncService
 from scraper.sources.steam import SteamGameSyncService
 from scraper.steam.orm import SteamApp, SteamBuildBranch, SteamOrganizationCredit
-from scraper.wikidata.config import ScraperConfig
-from scraper.wikidata.orm import ScraperDatabase, SourceFact, SourceRefresh
+from scraper.wikidata_deprecated.config import ScraperConfig
+from scraper.wikidata_deprecated.orm import ScraperDatabase, SourceFact, SourceRefresh
 
 
 def _database(tmp_path, name: str) -> ScraperDatabase:
@@ -140,17 +140,8 @@ async def test_steam_details_and_substructures_are_orm_cached(monkeypatch, tmp_p
                     .order_by(SteamOrganizationCredit.organization_name)
                 )
             ).all()
-            steam_facts = (
-                await session.scalars(
-                    select(SourceFact).where(
-                        SourceFact.source == "steam",
-                        SourceFact.steam_app_id == 42,
-                    )
-                )
-            ).all()
         assert app is not None and app.type == "game"
         assert branch is not None and branch.build_id == 123
         assert [item.organization_name for item in organizations] == ["Dev", "Pub"]
-        assert steam_facts == []
     finally:
         await database.dispose()

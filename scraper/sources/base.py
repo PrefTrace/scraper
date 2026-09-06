@@ -10,8 +10,8 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy import delete
 
-from scraper.wikidata.config import ScraperConfig
-from scraper.wikidata.orm import (
+from scraper.wikidata_deprecated.config import ScraperConfig
+from scraper.wikidata_deprecated.orm import (
     ScraperDatabase,
     SourceDiagnostic,
     SourceFact,

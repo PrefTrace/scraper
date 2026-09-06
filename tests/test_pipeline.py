@@ -15,7 +15,7 @@ from scraper.pipeline.models import (
     wikidata_organization_name_task,
 )
 from scraper.sources.steam import SteamRefreshResult
-from scraper.wikidata.sync import WikidataGameResult, WikidataOrganizationNameResult
+from scraper.wikidata_deprecated.sync import WikidataGameResult, WikidataOrganizationNameResult
 
 
 @pytest.mark.asyncio

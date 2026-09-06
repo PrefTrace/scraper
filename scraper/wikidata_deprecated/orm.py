@@ -259,7 +259,7 @@ class ScraperDatabase:
     def session(self) -> AsyncSession:
         return self.session_factory()
 
-    async def create_schema(self) -> None:
+    async def create_schema(self, *, steam_only: bool = False) -> None:
         # Register source-specific Steam tables before creating the shared
         # metadata. The import is local to avoid a module-level ORM cycle.
         from scraper.steam import orm as _steam_orm  # noqa: F401
@@ -267,7 +267,24 @@ class ScraperDatabase:
         async with self.engine.begin() as connection:
             await connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
-            await connection.run_sync(Base.metadata.create_all)
+            if steam_only:
+                table_names = {
+                    name
+                    for name in Base.metadata.tables
+                    if name.startswith("steam_")
+                    or name in {"source_refreshes", "source_diagnostics"}
+                }
+                tables = [
+                    table for name, table in Base.metadata.tables.items() if name in table_names
+                ]
+                await connection.run_sync(
+                    lambda sync_connection: Base.metadata.create_all(
+                        sync_connection,
+                        tables=tables,
+                    )
+                )
+            else:
+                await connection.run_sync(Base.metadata.create_all)
 
     async def dispose(self) -> None:
         await self.engine.dispose()

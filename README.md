@@ -3,8 +3,9 @@
 Асинхронный набор source-сервисов. Сервисы не возвращают агрегированный JSON:
 они получают AppID, проверяют TTL в SQLite и сохраняют обновлённые значения в
 операционные таблицы `SourceRefresh`/`SourceDiagnostic` и source-specific ORM-
-таблицы соответствующего источника. Steam хранится в таблицах `steam_*`, а
-универсальный `SourceFact` оставлен только для legacy/Wikidata-совместимости.
+таблицы соответствующего источника. Steam хранится в таблицах `steam_*`.
+Wikidata сейчас deprecated и в активный pipeline не подключён; его legacy-код
+не является частью текущего запуска.
 
 Требования разделены по границам сервисов:
 
@@ -41,10 +42,8 @@ asyncio.run(main())
 ## Pipeline и очереди
 
 В первой версии feeder читает AppID из файла, указанного в
-`SCRAPER_APPIDS_FILE`. Очереди находятся в памяти процесса. Для каждого
-источника запускается один асинхронный worker. Сами source-сервисы задачи не
-создают: после завершения Steam pipeline регистрирует независимые задачи
-Wikidata для игры, разработчиков и паблишеров.
+`SCRAPER_APPIDS_FILE`. Очередь Steam находится в памяти процесса. Для
+активного источника запускается один асинхронный worker.
 
 ```python
 import asyncio
@@ -55,7 +54,6 @@ from scraper import (
     ScraperDatabase,
     ScraperPipeline,
     SteamGameSyncService,
-    WikidataSyncService,
 )
 
 
@@ -68,7 +66,7 @@ async def main() -> None:
         pipeline = ScraperPipeline(
             PipelineServices(
                 steam=SteamGameSyncService(database),
-                wikidata=WikidataSyncService(database),
+                wikidata=None,  # deprecated; не запускается
             )
         )
         # Для тестового запуска используется ограниченный префикс файла.
@@ -80,28 +78,14 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`WikidataSyncService` и `SteamGameSyncService` используют общий TTL-кеш в базе.
-Очередь хранит только текущие задачи в памяти; факты, TTL и результаты
-источников сохраняются в ORM.
+Очередь хранит только текущие задачи в памяти; TTL и результаты Steam
+сохраняются в ORM. Wikidata оставлен вне текущего pipeline до отдельной задачи.
 
-Steam является первичным источником для цепочки обогащения. Результат
-`SteamGameSyncService.refresh()` возвращает текущие списки `developers` и
-`publishers`; pipeline одновременно ставит в очередь задачу Wikidata-игры и
-отдельные задачи поиска организаций по каждому имени. Если Wikidata не
-находит игру по AppID, отдельные задачи организаций всё равно выполняются.
-Поиск имени кешируется по TTL, а полная загрузка каждой найденной Q-сущности
-идёт отдельной задачей.
+## Wikidata (deprecated)
 
-## Wikidata
-
-Wikidata ищется напрямую по Steam AppID через `P1733`, затем дочитываются
-сущности и claims. ORM хранит нормализованные сущности, факты, qualifiers и
-связи. Поддерживаются данные игры и организаций: франшиза, соседние игры,
-основанное произведение, игроки, персонажи и роли, создатели, voice actors,
-награды, бюджет, продажи с датами, язык программирования, движок, технологии,
-внешние IDs, а также профиль организаций, финансы и штат как временной ряд.
-
-Поля `languages` и `game_mechanics` в результат Wikidata не входят.
+Wikidata не ставится в очередь, не запускает worker и не участвует в Steam-only
+схеме или бенчмарке. Legacy-пакет переименован в `scraper/wikidata_deprecated`
+и сохранён для последующего отдельного решения.
 
 ## PCGamingWiki (deprecated)
 
@@ -150,5 +134,6 @@ SCRAPER_REVIEW_MIN_LENGTH_CHARS=200
 .\.venv\Scripts\mypy.exe scraper
 ```
 
-В `demo/` находятся измерения Wikidata и примеры ORM-выгрузки.
-Каталог AppID для демо по-прежнему берётся существующим Steam-путём.
+Для реального прогона Steam используй `demo/benchmark_steam.py`; исторический
+`demo/benchmark_wikidata.py` не относится к текущему pipeline. Каталог AppID
+для демо берётся существующим Steam-путём.

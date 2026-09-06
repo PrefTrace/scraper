@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from scraper.steam.client import SteamClient, SteamClientError
 from scraper.steam.locales import (
@@ -35,7 +35,7 @@ from scraper.steam.storage import (
     remove_all_steam_data,
     remove_steam_scope,
 )
-from scraper.wikidata.orm import SourceDiagnostic, SourceFact, SourceRefresh, utcnow
+from scraper.wikidata_deprecated.orm import SourceDiagnostic, SourceRefresh, utcnow
 
 from .base import CachedSourceService
 
@@ -58,6 +58,14 @@ class SteamGameSyncService(CachedSourceService):
     """
 
     source = "steam"
+
+    async def ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
+        async with self._schema_lock:
+            if not self._schema_ready:
+                await self.database.create_schema(steam_only=True)
+                self._schema_ready = True
 
     async def refresh(
         self,
@@ -199,7 +207,7 @@ class SteamGameSyncService(CachedSourceService):
                         common.get("supported_languages")
                     )
                     browse = await get_store_browse(locale)
-                    browse_data = parse_store_browse_item(browse, price_region=country)
+                    browse_data = parse_store_browse_item(browse)
                     return {
                         "supported_languages": structured_languages
                         or browse_data.get("supported_languages")
@@ -414,20 +422,8 @@ class SteamGameSyncService(CachedSourceService):
                 state.last_error = error[1] if error else None
                 if status == "not_found":
                     await remove_all_steam_data(session, app_id)
-                    await session.execute(
-                        delete(SourceFact).where(
-                            SourceFact.source == self.source,
-                            SourceFact.steam_app_id == app_id,
-                        )
-                    )
                 elif status == "ready":
                     await remove_steam_scope(session, app_id, scope, data)
-                    await session.execute(
-                        delete(SourceFact).where(
-                            SourceFact.source == self.source,
-                            SourceFact.steam_app_id == app_id,
-                        )
-                    )
                     await persist_steam_scope(session, app_id, scope, data)
                     state.refreshed_at = observed_at
                 if error:

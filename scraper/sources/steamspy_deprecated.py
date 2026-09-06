@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 
 from scraper.steamspy_deprecated import SteamSpyClient, SteamSpyError
-from scraper.wikidata.orm import SourceRefresh
+from scraper.wikidata_deprecated.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 

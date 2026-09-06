@@ -66,9 +66,21 @@ class LanguageSupport(Model):
     name: str
     steam_language: str | None = None
     web_code: str | None = None
-    interface: bool | None = None
+    text: bool | None = None
+    audio: bool | None = None
     subtitles: bool | None = None
-    full_audio: bool | None = None
+
+    @property
+    def interface(self) -> bool | None:
+        """Backward-compatible parser name; the TZ column is ``text``."""
+
+        return self.text
+
+    @property
+    def full_audio(self) -> bool | None:
+        """Backward-compatible parser name; the TZ column is ``audio``."""
+
+        return self.audio
 
 
 class AppRelationship(Model):
@@ -85,12 +97,10 @@ class EditionInfo(Model):
     package_id: int
     name: str | None = None
     description: str | None = None
-    package_kind: str | None = None
 
 
 class EditionPrice(Model):
     package_id: int
-    currency: str | None = None
     initial: int | None = None
     final: int | None = None
     discount_percent: int | None = None
@@ -98,7 +108,6 @@ class EditionPrice(Model):
     period: str | None = None
     period_units: int | None = None
     price_region: str | None = None
-    store_country: str | None = None
 
 
 class Bundle(Model):
@@ -111,12 +120,14 @@ class Bundle(Model):
 
 class BundlePrice(Model):
     bundle_id: int
-    currency: str | None = None
-    discount_percent: int | None = None
+    effective_discount_percent: int | None = None
     initial: int | None = None
     final: int | None = None
     price_region: str | None = None
-    store_country: str | None = None
+
+    @property
+    def discount_percent(self) -> int | None:
+        return self.effective_discount_percent
 
 
 class ExternalLink(Model):
@@ -148,6 +159,8 @@ class SteamDeckSupport(Model):
 
 class ThirdPartyEula(Model):
     id: int | str | None = None
+    name_description: str | None = None
+    steam_link_support: bool | None = None
     url: str | None = None
     version: str | None = None
 
@@ -161,7 +174,6 @@ class Controller(Model):
 class OrganizationCredit(Model):
     name: str
     status: str
-    id: int | None = None
 
 
 class BuildBranch(Model):

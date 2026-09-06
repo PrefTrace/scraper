@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from scraper.hltb_deprecated.client import _load_hltb
-from scraper.wikidata.orm import SourceRefresh
+from scraper.wikidata_deprecated.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 

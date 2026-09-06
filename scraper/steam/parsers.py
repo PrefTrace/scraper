@@ -104,6 +104,39 @@ _MEDIA_KEY_TYPES = {
     "background_raw": "page_background",
 }
 
+_CANONICAL_MEDIA_TYPES = {
+    "screenshot",
+    "trailer",
+    "header_capsule",
+    "small_capsule",
+    "main_capsule",
+    "vertical_capsule",
+    "page_background",
+    "library_capsule",
+    "library_header",
+    "library_hero",
+    "library_logo",
+}
+
+
+def _canonical_media_type(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
+    normalized = {
+        "header": "header_capsule",
+        "header_image": "header_capsule",
+        "capsule": "main_capsule",
+        "capsule_image": "main_capsule",
+        "capsule_imagev5": "main_capsule",
+        "capsule_imagev6": "main_capsule",
+        "background": "page_background",
+        "background_raw": "page_background",
+        "movie": "trailer",
+        "video": "trailer",
+    }.get(normalized, normalized)
+    return normalized if normalized in _CANONICAL_MEDIA_TYPES else None
+
 _STEAM_TYPE_MAP = {
     "game": "game",
     "dlc": "dlc",
@@ -416,9 +449,9 @@ def parse_languages_fallback(value: str | None) -> list[LanguageSupport]:
                 # appdetails' comma-separated fallback does not tell us
                 # which columns are supported.  Do not turn absence of data
                 # into fabricated support flags.
-                interface=None,
+                text=None,
                 subtitles=None,
-                full_audio="<strong>" in raw_part.lower() or raw_part.rstrip().endswith("*"),
+                audio="<strong>" in raw_part.lower() or raw_part.rstrip().endswith("*"),
             )
         )
     return result
@@ -440,8 +473,8 @@ def parse_appinfo_languages(value: Any) -> list[LanguageSupport]:
                 name=raw_name,
                 web_code=web_code,
                 steam_language=steam_language,
-                interface=_parse_bool(flags.get("supported")),
-                full_audio=_parse_bool(flags.get("full_audio")),
+                text=_parse_bool(flags.get("supported")),
+                audio=_parse_bool(flags.get("full_audio")),
                 subtitles=_parse_bool(flags.get("subtitles")),
             )
         )
@@ -467,8 +500,8 @@ def parse_language_table(html: str) -> list[LanguageSupport]:
                 name=name,
                 web_code=web_code,
                 steam_language=steam_language,
-                interface=bool(cells[1].css_first("span")),
-                full_audio=bool(cells[2].css_first("span")),
+                text=bool(cells[1].css_first("span")),
+                audio=bool(cells[2].css_first("span")),
                 subtitles=bool(cells[3].css_first("span")),
             )
         )
@@ -604,11 +637,12 @@ def parse_media(
                 )
             else:
                 url = _optional_url(raw)
-            if url:
+            canonical_type = _canonical_media_type(key)
+            if url and canonical_type:
                 result.append(
                     MediaImage(
-                        media_type=str(key),
-                        type=str(key),
+                        media_type=canonical_type,
+                        type=canonical_type,
                         url=url,
                         full_url=url,
                         format=_format_from_url(url),
@@ -620,18 +654,19 @@ def parse_media(
     if isinstance(browse_assets, dict):
         asset_format = browse_assets.get("asset_url_format")
         for key, raw in browse_assets.items():
-            if key in {"asset_url_format", "small_capsule", "small_capsule_2x"}:
+            if key in {"asset_url_format", "small_capsule_2x"}:
                 continue
             raw_url = raw if isinstance(raw, str) else None
             if raw_url and isinstance(asset_format, str):
                 raw_url = asset_format.replace("${FILENAME}", raw_url)
                 raw_url = f"https://cdn.akamai.steamstatic.com/{raw_url}"
             url = _optional_url(raw_url)
-            if url:
+            canonical_type = _canonical_media_type(key)
+            if url and canonical_type:
                 result.append(
                     MediaImage(
-                        media_type=str(key),
-                        type=str(key),
+                        media_type=canonical_type,
+                        type=canonical_type,
                         url=url,
                         full_url=url,
                         format=_format_from_url(url),
@@ -755,15 +790,6 @@ def parse_editions(data: dict[str, Any]) -> tuple[list[int], list[EditionInfo], 
             EditionInfo(
                 package_id=package_id,
                 name=_edition_name(group, item),
-                package_kind=(
-                    "subscription"
-                    if _parse_bool(
-                        item.get(
-                            "is_recurring_subscription", group.get("is_recurring_subscription")
-                        )
-                    )
-                    else "one_time"
-                ),
                 description=(
                     str(item["description"])
                     if item.get("description") is not None
@@ -773,7 +799,6 @@ def parse_editions(data: dict[str, Any]) -> tuple[list[int], list[EditionInfo], 
                 ),
             )
         )
-        currency = item.get("currency", group.get("currency"))
         initial = _parse_int(
             item.get("price_in_cents", item.get("initial", group.get("price_in_cents")))
         )
@@ -789,7 +814,6 @@ def parse_editions(data: dict[str, Any]) -> tuple[list[int], list[EditionInfo], 
         prices.append(
             EditionPrice(
                 package_id=package_id,
-                currency=str(currency) if currency is not None else None,
                 initial=initial,
                 final=final,
                 discount_percent=_parse_int(
@@ -839,14 +863,12 @@ def parse_bundles(data: dict[str, Any]) -> tuple[list[Bundle], list[BundlePrice]
                 edition_package_ids=list(dict.fromkeys(edition_ids)),
             )
         )
-        currency = raw.get("currency")
         initial = _parse_int(raw.get("price_before_discount", raw.get("initial")))
         final = _parse_int(raw.get("price", raw.get("final")))
         prices.append(
             BundlePrice(
                 bundle_id=bundle_id,
-                currency=str(currency) if currency is not None else None,
-                discount_percent=_parse_int(
+                effective_discount_percent=_parse_int(
                     raw.get("discount_pct", raw.get("discount_percent"))
                 ),
                 initial=initial,
@@ -1099,6 +1121,12 @@ def parse_eulas(data: dict[str, Any] | None, html: str | None = None) -> list[Th
                         if raw.get("id", raw.get("eulaid")) is not None
                         else None
                     ),
+                    name_description=(
+                        str(raw["name_description"])
+                        if raw.get("name_description") is not None
+                        else str(raw["name"]) if raw.get("name") is not None else None
+                    ),
+                    steam_link_support=_parse_bool(raw.get("steam_link_support")),
                     url=_optional_url(raw.get("url")),
                     version=raw.get("version"),
                 )
@@ -1111,6 +1139,7 @@ def parse_eulas(data: dict[str, Any] | None, html: str | None = None) -> list[Th
                 result.append(
                     ThirdPartyEula(
                         id=node.attributes.get("data-eula-id"),
+                        name_description=_node_text(node),
                         url=url,
                     )
                 )
@@ -1243,12 +1272,11 @@ def parse_organizations(data: dict[str, Any] | None) -> list[OrganizationCredit]
         for raw in _as_list(data.get(key)):
             if isinstance(raw, dict):
                 name = raw.get("name")
-                organization_id = _parse_int(raw.get("id"))
             else:
-                name, organization_id = raw, None
+                name = raw
             if isinstance(name, str) and name.strip():
                 result.append(
-                    OrganizationCredit(name=name.strip(), status=status, id=organization_id)
+                    OrganizationCredit(name=name.strip(), status=status)
                 )
     return result
 
@@ -1410,15 +1438,7 @@ def parse_store_browse_item(
         if isinstance(values, list) and values and isinstance(values[0], dict):
             item = values[0]
     purchase_options = _as_list(item.get("purchase_options"))
-    country = (price_region or "").upper() or None
-    currency_by_country = {
-        "US": "USD",
-        "GB": "GBP",
-        "RU": "RUB",
-        "DE": "EUR",
-        "KZ": "KZT",
-    }
-    currency = currency_by_country.get(country or "")
+    region = (price_region or "").upper() or None
     editions: list[EditionInfo] = []
     edition_prices: list[EditionPrice] = []
     bundles: list[Bundle] = []
@@ -1445,7 +1465,6 @@ def parse_store_browse_item(
                 EditionInfo(
                     package_id=package_id,
                     name=name,
-                    package_kind="subscription" if is_subscription else "one_time",
                 )
             )
             period_units = None
@@ -1454,15 +1473,13 @@ def parse_store_browse_item(
             edition_prices.append(
                 EditionPrice(
                     package_id=package_id,
-                    currency=currency,
                     initial=initial,
                     final=final,
                     discount_percent=_parse_int(raw.get("discount_pct")),
                     price_type="recurring" if is_subscription else "one_time",
                     period="month" if is_subscription else None,
                     period_units=period_units,
-                    price_region=country,
-                    store_country=country,
+                    price_region=region,
                 )
             )
         if bundle_id is not None:
@@ -1489,12 +1506,10 @@ def parse_store_browse_item(
             bundle_prices.append(
                 BundlePrice(
                     bundle_id=bundle_id,
-                    currency=currency,
-                    discount_percent=discount,
+                    effective_discount_percent=discount,
                     initial=initial,
                     final=final,
-                    price_region=country,
-                    store_country=country,
+                    price_region=region,
                 )
             )
     return {
@@ -1521,8 +1536,8 @@ def parse_store_browse_languages(value: Any) -> list[LanguageSupport]:
                 name=name,
                 web_code=web_code,
                 steam_language=steam_language,
-                interface=_parse_bool(raw.get("supported", raw.get("interface"))),
-                full_audio=_parse_bool(raw.get("full_audio")),
+                text=_parse_bool(raw.get("supported", raw.get("interface"))),
+                audio=_parse_bool(raw.get("full_audio")),
                 subtitles=_parse_bool(raw.get("subtitles")),
             )
         )
@@ -1608,7 +1623,7 @@ def parse_app_details(
     data = merge_app_info(data, app_info)
     browse_data: dict[str, Any] = {}
     if store_browse:
-        browse = parse_store_browse_item(store_browse, price_region=store_country)
+        browse = parse_store_browse_item(store_browse)
         browse_data = browse
         for key in ("editions", "edition_prices", "bundles", "bundle_prices"):
             if browse.get(key):
@@ -1648,7 +1663,7 @@ def parse_app_details(
     media = parse_media(data, language=locale.requested)
     if store_browse:
         media.extend(
-            parse_store_browse_item(store_browse, price_region=store_country).get("media", [])
+            parse_store_browse_item(store_browse).get("media", [])
         )
     screenshots = [
         item for item in media if isinstance(item, MediaImage) and item.media_type == "screenshot"

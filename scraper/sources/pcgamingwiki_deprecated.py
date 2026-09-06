@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 
 from scraper.pcgamingwiki_deprecated import PCGamingWikiClient, PCGamingWikiError
-from scraper.wikidata.orm import SourceRefresh
+from scraper.wikidata_deprecated.orm import SourceRefresh
 
 from .base import CachedSourceService, SourceLoadError
 

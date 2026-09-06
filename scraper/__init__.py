@@ -10,7 +10,7 @@ from .sources import (
     SteamRefreshResult,
     SteamSpySyncService,
 )
-from .wikidata import (
+from .wikidata_deprecated import (
     ScraperConfig,
     ScraperDatabase,
     WikidataGame,

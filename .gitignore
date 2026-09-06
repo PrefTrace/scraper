@@ -154,6 +154,7 @@ activemq-data/
 demo/*
 !demo/benchmark_wikidata.py
 !demo/benchmark_pipeline.py
+!demo/benchmark_steam.py
 !demo/wikidata_benchmark.json
 !demo/wikidata.sqlite3
 !demo/wikidata_samples.md

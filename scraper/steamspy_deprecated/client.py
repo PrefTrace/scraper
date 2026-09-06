@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from scraper.wikidata.config import ScraperConfig
+from scraper.wikidata_deprecated.config import ScraperConfig
 
 from .models import SteamSpyStats
 

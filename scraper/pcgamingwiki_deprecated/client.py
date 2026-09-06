@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import httpx
 
-from scraper.wikidata.config import ScraperConfig
+from scraper.wikidata_deprecated.config import ScraperConfig
 
 from .models import (
     CargoScalar,

@@ -8,14 +8,16 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from scraper.wikidata.orm import Base
+from scraper.wikidata_deprecated.orm import Base
 
 
 class SteamApp(Base):
@@ -27,8 +29,8 @@ class SteamApp(Base):
     dlc_for_app_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     optional_dlc: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     required_app_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    windows_build: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     linux_build: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    windows_build: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     mac_build: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     vac_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     metacritic_name: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -38,12 +40,11 @@ class SteamApp(Base):
     controller_support: Mapped[str | None] = mapped_column(String(32), nullable=True)
     release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     release_date_max: Mapped[date | None] = mapped_column(Date, nullable=True)
-    release_date_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     release_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    coming_soon: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     external_account_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
     drm_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
-    website: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class SteamAppLocalization(Base):
     __tablename__ = "steam_app_localizations"
 
@@ -51,16 +52,11 @@ class SteamAppLocalization(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     language: Mapped[str] = mapped_column(String(16), primary_key=True)
-    store_country: Mapped[str] = mapped_column(String(2), default="", nullable=False)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    short_description_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     about: Mapped[str | None] = mapped_column(Text, nullable=True)
-    about_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     long_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    long_description_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     legal_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
-    legal_notice_html: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SteamMedia(Base):
@@ -77,9 +73,6 @@ class SteamMedia(Base):
     url: Mapped[str] = mapped_column(Text)
     format: Mapped[str | None] = mapped_column(String(16), nullable=True)
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    full_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    media_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class SteamEdition(Base):
@@ -88,7 +81,6 @@ class SteamEdition(Base):
     package_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    package_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class SteamAppEdition(Base):
@@ -109,8 +101,6 @@ class SteamEditionPrice(Base):
         ForeignKey("steam_editions.package_id", ondelete="CASCADE"), primary_key=True
     )
     price_region: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
-    store_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
-    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -146,9 +136,7 @@ class SteamBundlePrice(Base):
         ForeignKey("steam_bundles.bundle_id", ondelete="CASCADE"), primary_key=True
     )
     price_region: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
-    store_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
-    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effective_discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -160,36 +148,37 @@ class SteamExternalLink(Base):
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
-    link_type: Mapped[str] = mapped_column(String(64))
+    link_type: Mapped[str] = mapped_column("type", String(64))
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_scope: Mapped[str] = mapped_column(String(160), default="")
 
 
 class SteamAgeRating(Base):
     __tablename__ = "steam_age_ratings"
 
+    age_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     app_id: Mapped[int] = mapped_column(
-        ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
-    age_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     standard: Mapped[str] = mapped_column(String(64))
-    rating: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    minimum_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rating_generated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     use_age_gate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     banned: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    rating: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    minimum_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     descriptor_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SteamDescriptor(Base):
     __tablename__ = "steam_descriptors"
+    __table_args__ = (
+        UniqueConstraint("age_id", "steam_id", "name", name="uq_steam_descriptor"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    app_id: Mapped[int] = mapped_column(
-        ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
+    age_id: Mapped[str] = mapped_column(
+        ForeignKey("steam_age_ratings.age_id", ondelete="CASCADE"), index=True
     )
-    age_id: Mapped[str] = mapped_column(String(64))
     steam_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     name: Mapped[str] = mapped_column(Text)
 
@@ -212,8 +201,8 @@ class SteamFeature(Base):
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
-    category_id: Mapped[int | None] = mapped_column(Integer, primary_key=True, nullable=True)
-    english_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    category_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
+    english_name: Mapped[str] = mapped_column(Text)
 
 
 class SteamAccessibilityFeature(Base):
@@ -222,8 +211,8 @@ class SteamAccessibilityFeature(Base):
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
-    category_id: Mapped[int | None] = mapped_column(Integer, primary_key=True, nullable=True)
-    english_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    category_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
+    english_name: Mapped[str] = mapped_column(Text)
 
 
 class SteamDeckSupport(Base):
@@ -237,12 +226,17 @@ class SteamDeckSupport(Base):
 
 class SteamEula(Base):
     __tablename__ = "steam_eulas"
+    __table_args__ = (
+        UniqueConstraint("app_id", "eula_id", name="uq_steam_eula_source"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
     eula_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    name_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    steam_link_support: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -266,7 +260,6 @@ class SteamOrganizationCredit(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
     status: Mapped[str] = mapped_column(String(16))
-    organization_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     organization_name: Mapped[str] = mapped_column(Text)
 
 
@@ -277,8 +270,8 @@ class SteamSupportedLanguage(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     language: Mapped[str] = mapped_column(String(32), primary_key=True)
-    interface: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    full_audio: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    audio: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    text: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     subtitles: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
@@ -298,6 +291,15 @@ class SteamBuildBranch(Base):
 
 class SteamReviewLanguageStat(Base):
     __tablename__ = "steam_review_language_stats"
+    __table_args__ = (
+        UniqueConstraint("app_id", "language", name="uq_steam_review_language_stat"),
+        Index(
+            "uq_steam_review_language_stat_all",
+            "app_id",
+            unique=True,
+            sqlite_where=text("language IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
@@ -308,7 +310,6 @@ class SteamReviewLanguageStat(Base):
     total_negative: Mapped[int] = mapped_column(Integer, default=0)
     total_positive: Mapped[int] = mapped_column(Integer, default=0)
     review_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    source_scope: Mapped[str] = mapped_column(String(160), default="")
 
 
 class SteamReview(Base):
@@ -318,7 +319,7 @@ class SteamReview(Base):
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
-    review_type: Mapped[str] = mapped_column(String(16))
+    # TZ extension: Steam's recommendationid is the stable source identity.
     recommendation_id: Mapped[str] = mapped_column(String(128), index=True)
     user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     playtime_forever: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -359,19 +360,20 @@ class SteamExternalReview(Base):
 class SteamAchievement(Base):
     __tablename__ = "steam_achievements"
     __table_args__ = (
-        UniqueConstraint("app_id", "achievement_key", name="uq_steam_achievement_key"),
+        UniqueConstraint("app_id", "api_name", name="uq_steam_achievement_api_name"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
-    achievement_key: Mapped[str] = mapped_column(String(256))
-    achievement_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    api_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Steam's stable achievement identifier is normally the string apiname.
+    api_name: Mapped[str] = mapped_column(String(256))
+    achievement_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     icon_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     global_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     hidden: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
 
 class SteamAchievementLocalization(Base):
     __tablename__ = "steam_achievement_localizations"

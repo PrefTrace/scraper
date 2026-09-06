@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from scraper.sources.steam import SteamGameSyncService, SteamRefreshResult
-from scraper.wikidata.sync import (
+from scraper.wikidata_deprecated.sync import (
     WikidataGameResult,
     WikidataOrganizationNameResult,
     WikidataSyncService,
@@ -25,7 +25,7 @@ from .queue import InMemoryTaskQueue
 @dataclass(slots=True)
 class PipelineServices:
     steam: SteamGameSyncService
-    wikidata: WikidataSyncService
+    wikidata: WikidataSyncService | None = None
 
 
 class ScraperPipeline:
@@ -33,12 +33,15 @@ class ScraperPipeline:
 
     def __init__(self, services: PipelineServices) -> None:
         self.services = services
-        queue_names = [QUEUE_STEAM, QUEUE_WIKIDATA]
+        queue_names = [QUEUE_STEAM]
+        if services.wikidata is not None:
+            queue_names.append(QUEUE_WIKIDATA)
         self.queue = InMemoryTaskQueue(queue_names)
 
     async def start(self) -> None:
         await self.queue.start_worker(QUEUE_STEAM, self._handle_steam)
-        await self.queue.start_worker(QUEUE_WIKIDATA, self._handle_wikidata)
+        if self.services.wikidata is not None:
+            await self.queue.start_worker(QUEUE_WIKIDATA, self._handle_wikidata)
 
     async def run_from_file(self, path: str, *, limit: int | None = None) -> int:
         feeder = AppIdFileFeeder(path)
@@ -57,6 +60,8 @@ class ScraperPipeline:
         return result
 
     async def _enqueue_enrichment(self, app_id: int, result: SteamRefreshResult) -> None:
+        if self.services.wikidata is None:
+            return
         await self.queue.enqueue(wikidata_game_task(app_id))
         for name in result.developers:
             await self._enqueue_organization_name(
@@ -102,6 +107,8 @@ class ScraperPipeline:
         result: WikidataOrganizationNameResult,
         subscribers: set[TaskSubscriber],
     ) -> None:
+        if self.services.wikidata is None:
+            return
         for subscriber in subscribers:
             for qid in result.qids:
                 await self.services.wikidata.link_game_entity(
@@ -112,6 +119,8 @@ class ScraperPipeline:
                 await self.queue.enqueue(wikidata_entity_task(qid))
 
     async def _handle_wikidata(self, task: QueueTask, queue: InMemoryTaskQueue) -> object:
+        if self.services.wikidata is None:
+            raise RuntimeError("Wikidata queue is deprecated and not configured")
         if task.task_type == "game":
             assert task.app_id is not None
             result = await self.services.wikidata.refresh_game_task(task.app_id)

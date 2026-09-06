@@ -7,15 +7,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from scraper.wikidata.config import ScraperConfig
-from scraper.wikidata.orm import (
+from scraper.wikidata_deprecated.config import ScraperConfig
+from scraper.wikidata_deprecated.orm import (
     ScraperDatabase,
     WikidataEntity,
     WikidataFact,
     WikidataGame,
     WikidataGameLink,
 )
-from scraper.wikidata.sync import WikidataSyncService, _save_entity_payload, utcnow
+from scraper.wikidata_deprecated.sync import WikidataSyncService, _save_entity_payload, utcnow
 
 
 def _item(qid: str) -> dict[str, object]:
@@ -266,7 +266,7 @@ async def test_missing_game_still_resolves_steam_organizations(monkeypatch, tmp_
                     for qid in ids
                 }
 
-        monkeypatch.setattr("scraper.wikidata.sync.WikidataClient", FakeWikidataClient)
+        monkeypatch.setattr("scraper.wikidata_deprecated.sync.WikidataClient", FakeWikidataClient)
         first = await service.refresh_game_task(42, client=object())
         dev = await service.refresh_organization_name("Dev", client=object())
         pub = await service.refresh_organization_name("Pub", client=object())
