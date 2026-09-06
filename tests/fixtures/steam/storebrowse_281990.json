@@ -1,0 +1,16 @@
+{
+  "response": {
+    "store_items": [{
+      "appid": 281990,
+      "name": "Stellaris",
+      "purchase_options": [
+        {"packageid": 38760, "purchase_option_name": "Stellaris", "final_price_in_cents": "4999", "package_group": "default"},
+        {"packageid": 979486, "purchase_option_name": "Stellaris Subscription: 1 Month Initial", "final_price_in_cents": "999", "package_group": "subscriptions", "recurrence_info": {"renewal_time_unit": 6, "renewal_time_period": 1, "renewal_price_in_cents": "999"}},
+        {"packageid": 979488, "purchase_option_name": "Stellaris Subscription: 3 Months Initial", "final_price_in_cents": "1999", "package_group": "subscriptions", "recurrence_info": {"renewal_time_unit": 6, "renewal_time_period": 3, "renewal_price_in_cents": "1999"}},
+        {"packageid": 979490, "purchase_option_name": "Stellaris Subscription: 6 Months Initial", "final_price_in_cents": "2999", "package_group": "subscriptions", "recurrence_info": {"renewal_time_unit": 6, "renewal_time_period": 6, "renewal_price_in_cents": "2999"}},
+        {"bundleid": 21037, "purchase_option_name": "Stellaris: Ultimate", "final_price_in_cents": "28520", "bundle_discount_pct": 27, "price_before_bundle_discount": "39077"}
+      ],
+      "included_items": {"included_apps": [{"appid": 518910, "name": "Stellaris: Leviathans Story Pack", "best_purchase_option": {"packageid": 121840}}]}
+    }]
+  }
+}

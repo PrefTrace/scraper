@@ -1,0 +1,12 @@
+{
+  "appid": 281990,
+  "common": {
+    "type": "Game",
+    "category": {"category_1": "1", "category_2": "1", "category_22": "1", "category_62": "1"},
+    "steam_deck_compatibility": {"category": "2"},
+    "supported_languages": {
+      "english": {"supported": "true"},
+      "russian": {"supported": "true"}
+    }
+  }
+}

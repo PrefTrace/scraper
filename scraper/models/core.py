@@ -85,6 +85,7 @@ class EditionInfo(Model):
     package_id: int
     name: str | None = None
     description: str | None = None
+    package_kind: str | None = None
 
 
 class EditionPrice(Model):
@@ -96,6 +97,8 @@ class EditionPrice(Model):
     price_type: str = "one_time"
     period: str | None = None
     period_units: int | None = None
+    price_region: str | None = None
+    store_country: str | None = None
 
 
 class Bundle(Model):
@@ -112,6 +115,8 @@ class BundlePrice(Model):
     discount_percent: int | None = None
     initial: int | None = None
     final: int | None = None
+    price_region: str | None = None
+    store_country: str | None = None
 
 
 class ExternalLink(Model):
@@ -142,7 +147,7 @@ class SteamDeckSupport(Model):
 
 
 class ThirdPartyEula(Model):
-    id: int | None = None
+    id: int | str | None = None
     url: str | None = None
     version: str | None = None
 

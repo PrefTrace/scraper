@@ -11,7 +11,7 @@ import calendar
 import re
 from datetime import UTC, date, datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from selectolax.parser import HTMLParser, Node
 
@@ -64,14 +64,17 @@ _STEAM_LANGUAGE_NAMES: dict[str, tuple[str, str]] = {
     "italian": ("it", "italian"),
     "japanese": ("ja", "japanese"),
     "korean": ("ko", "koreana"),
+    "koreana": ("ko", "koreana"),
     "malay": ("ms", "malay"),
     "norwegian": ("no", "norwegian"),
     "polish": ("pl", "polish"),
     "portuguese - portugal": ("pt", "portuguese"),
     "portuguese - brazil": ("pt-BR", "brazilian"),
+    "brazilian": ("pt-BR", "brazilian"),
     "romanian": ("ro", "romanian"),
     "russian": ("ru", "russian"),
     "simplified chinese": ("zh-CN", "schinese"),
+    "schinese": ("zh-CN", "schinese"),
     "spanish - spain": ("es", "spanish"),
     "spanish - latin america": ("es-419", "latam"),
     "swedish": ("sv", "swedish"),
@@ -83,17 +86,11 @@ _STEAM_LANGUAGE_NAMES: dict[str, tuple[str, str]] = {
 }
 
 _CONTENT_DESCRIPTOR_NAMES = {
-    1: "mild language",
-    2: "violence",
-    3: "blood",
-    4: "nudity",
-    5: "sexual content",
-    6: "strong language",
-    7: "mature humor",
-    8: "drugs",
-    9: "horror",
-    10: "gambling",
-    11: "general mature content",
+    1: "Some Nudity or Sexual Content",
+    2: "Frequent Violence or Gore",
+    3: "Adult Only Sexual Content",
+    4: "Frequent Nudity or Sexual Content",
+    5: "General Mature Content",
 }
 
 _MEDIA_KEY_TYPES = {
@@ -106,6 +103,50 @@ _MEDIA_KEY_TYPES = {
     "background": "page_background",
     "background_raw": "page_background",
 }
+
+_STEAM_TYPE_MAP = {
+    "game": "game",
+    "dlc": "dlc",
+    "music": "soundtrack",
+    "soundtrack": "soundtrack",
+    "software": "application",
+    "application": "application",
+    "video": "video",
+    "hardware": "hardware",
+    "demo": "demo",
+}
+
+_STEAM_CATEGORY_NAMES = {
+    1: "Multi-player",
+    2: "Single-player",
+    3: "Co-op",
+    8: "Valve Anti-Cheat enabled",
+    18: "Partial Controller Support",
+    22: "Steam Achievements",
+    23: "Steam Cloud",
+    27: "Cross-Platform Multiplayer",
+    28: "Full Controller Support",
+    29: "Steam Trading Cards",
+    30: "Steam Workshop",
+    33: "Steam Workshop",
+    45: "Remote Play on Phone",
+    46: "Remote Play on Tablet",
+    55: "DualShock 4 (USB)",
+    56: "DualShock 4 (Bluetooth)",
+    57: "DualSense (USB)",
+    58: "DualSense (Bluetooth)",
+    60: "Gamepad Preferred",
+    62: "Family Sharing",
+}
+
+
+def normalize_steam_type(value: Any) -> str | None:
+    """Map Steam's display type to the TZ canonical vocabulary."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().casefold()
+    return _STEAM_TYPE_MAP.get(normalized, normalized)
 
 
 def _node_text(node: Node | None) -> str:
@@ -166,6 +207,12 @@ def _parse_bool(value: Any) -> bool | None:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return None
+
+
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -366,9 +413,36 @@ def parse_languages_fallback(value: str | None) -> list[LanguageSupport]:
                 name=part,
                 web_code=web_code,
                 steam_language=steam_language,
-                interface=True,
-                subtitles=True,
+                # appdetails' comma-separated fallback does not tell us
+                # which columns are supported.  Do not turn absence of data
+                # into fabricated support flags.
+                interface=None,
+                subtitles=None,
                 full_audio="<strong>" in raw_part.lower() or raw_part.rstrip().endswith("*"),
+            )
+        )
+    return result
+
+
+def parse_appinfo_languages(value: Any) -> list[LanguageSupport]:
+    """Parse the structured ``common.supported_languages`` AppInfo map."""
+
+    if not isinstance(value, dict):
+        return []
+    result: list[LanguageSupport] = []
+    for raw_name, raw_flags in value.items():
+        if not isinstance(raw_name, str):
+            continue
+        flags = raw_flags if isinstance(raw_flags, dict) else {}
+        web_code, steam_language = _language(raw_name)
+        result.append(
+            LanguageSupport(
+                name=raw_name,
+                web_code=web_code,
+                steam_language=steam_language,
+                interface=_parse_bool(flags.get("supported")),
+                full_audio=_parse_bool(flags.get("full_audio")),
+                subtitles=_parse_bool(flags.get("subtitles")),
             )
         )
     return result
@@ -521,11 +595,13 @@ def parse_media(
                 )
             )
 
-    assets = data.get("library_assets")
+    assets = data.get("library_assets_full") or data.get("library_assets")
     if isinstance(assets, dict):
         for key, raw in assets.items():
             if isinstance(raw, dict):
-                url = _optional_url(raw.get("image") or raw.get("url") or raw.get("filename"))
+                url = _optional_url(
+                    raw.get("image") or raw.get("url") or raw.get("filename")
+                )
             else:
                 url = _optional_url(raw)
             if url:
@@ -540,23 +616,85 @@ def parse_media(
                     )
                 )
 
-    for item in _as_list(data.get("movies")):
+    browse_assets = data.get("assets")
+    if isinstance(browse_assets, dict):
+        asset_format = browse_assets.get("asset_url_format")
+        for key, raw in browse_assets.items():
+            if key in {"asset_url_format", "small_capsule", "small_capsule_2x"}:
+                continue
+            raw_url = raw if isinstance(raw, str) else None
+            if raw_url and isinstance(asset_format, str):
+                raw_url = asset_format.replace("${FILENAME}", raw_url)
+                raw_url = f"https://cdn.akamai.steamstatic.com/{raw_url}"
+            url = _optional_url(raw_url)
+            if url:
+                result.append(
+                    MediaImage(
+                        media_type=str(key),
+                        type=str(key),
+                        url=url,
+                        full_url=url,
+                        format=_format_from_url(url),
+                        language=language,
+                    )
+                )
+
+    movies = list(_as_list(data.get("movies")))
+    trailers = data.get("trailers")
+    if isinstance(trailers, dict):
+        for item in _as_list(trailers.get("highlights")):
+            if not isinstance(item, dict):
+                continue
+            webm_filename = next(
+                (
+                    raw.get("filename")
+                    for raw in _as_list(item.get("microtrailer"))
+                    if isinstance(raw, dict) and raw.get("type") == "video/webm"
+                ),
+                None,
+            )
+            if isinstance(webm_filename, str):
+                base = item.get("trailer_url_format")
+                webm_url = (
+                    base.replace("${FILENAME}", webm_filename)
+                    if isinstance(base, str)
+                    else f"https://cdn.akamai.steamstatic.com/steam/apps/{webm_filename}"
+                )
+                if not webm_url.startswith(("http://", "https://")):
+                    webm_url = f"https://cdn.akamai.steamstatic.com/{webm_url.lstrip('/')}"
+                movies.append(
+                    {
+                        "id": item.get("trailer_base_id"),
+                        "name": item.get("trailer_name"),
+                        "webm": {"max": webm_url},
+                        "thumbnail": item.get("screenshot_full"),
+                    }
+                )
+
+    for item in movies:
         if not isinstance(item, dict):
             continue
-        urls = [
-            _optional_url(item.get("hls_h264")),
-            _optional_url(item.get("dash_h264")),
-            _optional_url(item.get("dash_av1")),
-        ]
-        primary_url = next((url for url in (urls[2], urls[1], urls[0]) if url), None)
+        webm_value = item.get("webm")
+        webm_data: dict[str, Any] = webm_value if isinstance(webm_value, dict) else {}
+        webm_max = _optional_url(webm_data.get("max"))
+        webm_480 = _optional_url(webm_data.get("480"))
+        hls_url = _optional_url(item.get("hls_h264"))
+        dash_h264_url = _optional_url(item.get("dash_h264"))
+        dash_av1_url = _optional_url(item.get("dash_av1"))
+        # Steam's WebM files are stable downloadable media. Prefer them over
+        # DASH manifests, which are not useful as a canonical media URL.
+        primary_url = next(
+            (url for url in (webm_max, webm_480, hls_url, dash_h264_url, dash_av1_url) if url),
+            None,
+        )
         result.append(
             MediaVideo(
                 id=_parse_int(item.get("id")),
                 name=item.get("name") if isinstance(item.get("name"), str) else None,
                 thumbnail_url=_optional_url(item.get("thumbnail")),
-                dash_av1_url=urls[2],
-                dash_h264_url=urls[1],
-                hls_h264_url=urls[0],
+                dash_av1_url=dash_av1_url,
+                dash_h264_url=dash_h264_url,
+                hls_h264_url=hls_url,
                 highlight=_parse_bool(item.get("highlight")),
                 media_type="trailer",
                 type="trailer",
@@ -587,10 +725,23 @@ def _package_entries(data: dict[str, Any]) -> list[tuple[int, dict[str, Any], di
 
 
 def _edition_name(group: dict[str, Any], item: dict[str, Any]) -> str | None:
-    for value in (item.get("name"), item.get("option_text"), group.get("name")):
+    for value in (
+        item.get("name"),
+        item.get("option_text"),
+        item.get("purchase_option_name"),
+        group.get("name"),
+    ):
         if isinstance(value, str) and value.strip():
             name = plain_text(value).strip()
-            return re.sub(r"^(?:buy|purchase)\s+", "", name, flags=re.IGNORECASE).strip()
+            name = re.sub(r"^(?:buy|purchase)\s+", "", name, flags=re.IGNORECASE).strip()
+            # Store HTML sometimes appends the display price to the option
+            # label.  Price belongs to the price row, never to package name.
+            return re.sub(
+                r"\s+(?:[$€£]\s*[\d,.]+|[\d,.]+\s*(?:USD|EUR|GBP|RUB))$",
+                "",
+                name,
+                flags=re.IGNORECASE,
+            ).rstrip(" -–—:").strip()
     return None
 
 
@@ -604,6 +755,15 @@ def parse_editions(data: dict[str, Any]) -> tuple[list[int], list[EditionInfo], 
             EditionInfo(
                 package_id=package_id,
                 name=_edition_name(group, item),
+                package_kind=(
+                    "subscription"
+                    if _parse_bool(
+                        item.get(
+                            "is_recurring_subscription", group.get("is_recurring_subscription")
+                        )
+                    )
+                    else "one_time"
+                ),
                 description=(
                     str(item["description"])
                     if item.get("description") is not None
@@ -803,7 +963,7 @@ def parse_descriptors(
                     Descriptor(
                         age_id="steam",
                         steam_id=descriptor_id,
-                        name=_CONTENT_DESCRIPTOR_NAMES.get(descriptor_id, str(descriptor_id)),
+                        name=_CONTENT_DESCRIPTOR_NAMES.get(descriptor_id, "unknown"),
                     )
                 )
         notes = data.get("notes")
@@ -839,6 +999,9 @@ def parse_features(data: dict[str, Any] | None) -> list[Category]:
         return []
     result: list[Category] = []
     for raw in _as_list(data.get("categories")):
+        if isinstance(raw, Category):
+            result.append(raw)
+            continue
         if not isinstance(raw, dict) or not raw.get("description"):
             continue
         result.append(Category(id=_parse_int(raw.get("id")), name=str(raw["description"])))
@@ -882,6 +1045,8 @@ def parse_accessibility_features(
 
 
 def _deck_status(raw: Any) -> str:
+    if isinstance(raw, SteamDeckSupport):
+        raw = raw.status
     if isinstance(raw, dict):
         raw = raw.get("category", raw.get("status", raw.get("steam_deck_status")))
     if isinstance(raw, (int, float)):
@@ -915,13 +1080,25 @@ def parse_eulas(data: dict[str, Any] | None, html: str | None = None) -> list[Th
     result: list[ThirdPartyEula] = []
     if isinstance(data, dict):
         raw_eulas = data.get("eulas", data.get("eula"))
-        eula_values = _as_list(raw_eulas) or ([raw_eulas] if isinstance(raw_eulas, dict) else [])
+        if isinstance(raw_eulas, dict):
+            eula_values = [
+                {"id": key, **value} if isinstance(value, dict) else {"id": key}
+                for key, value in raw_eulas.items()
+            ]
+        else:
+            eula_values = _as_list(raw_eulas)
         for raw in eula_values:
             if not isinstance(raw, dict):
                 continue
             result.append(
                 ThirdPartyEula(
-                    id=_parse_int(raw.get("id", raw.get("eulaid"))),
+                    id=(
+                        _parse_int(raw.get("id", raw.get("eulaid")))
+                        if _parse_int(raw.get("id", raw.get("eulaid"))) is not None
+                        else str(raw.get("id", raw.get("eulaid")))
+                        if raw.get("id", raw.get("eulaid")) is not None
+                        else None
+                    ),
                     url=_optional_url(raw.get("url")),
                     version=raw.get("version"),
                 )
@@ -933,7 +1110,7 @@ def parse_eulas(data: dict[str, Any] | None, html: str | None = None) -> list[Th
             if url:
                 result.append(
                     ThirdPartyEula(
-                        id=_parse_int(node.attributes.get("data-eula-id")),
+                        id=node.attributes.get("data-eula-id"),
                         url=url,
                     )
                 )
@@ -973,6 +1150,89 @@ def parse_controllers(data: dict[str, Any] | None, html: str | None = None) -> l
             seen.add(controller.name)
             unique.append(controller)
     return unique
+
+
+def parse_appinfo_category_ids(value: Any) -> list[Category]:
+    """Map AppInfo category ids to the TZ category/accessibility split."""
+
+    if isinstance(value, dict):
+        nested = value.get("category", value.get("categories"))
+        if nested is not None:
+            value = nested
+        else:
+            value = [
+                int(key.removeprefix("category_"))
+                for key in value
+                if isinstance(key, str) and key.startswith("category_") and key[9:].isdigit()
+            ]
+    result: list[Category] = []
+    for raw in _as_list(value):
+        category_id = _parse_int(raw.get("id") if isinstance(raw, dict) else raw)
+        if category_id is None:
+            continue
+        if isinstance(raw, dict):
+            name = str(raw.get("description") or raw.get("name") or category_id)
+        else:
+            name = str(category_id)
+        result.append(Category(id=category_id, name=name))
+    return result
+
+
+def parse_appinfo_semantics(common: dict[str, Any]) -> dict[str, Any]:
+    """Extract structured category/controller/deck semantics from AppInfo."""
+
+    category_ids = [
+        item.id
+        for item in parse_appinfo_category_ids(common.get("category"))
+        if item.id is not None
+    ]
+    controller_support = _controller_support_level(common.get("controller_support"))
+    deck = common.get("steam_deck_compatibility")
+    if not isinstance(deck, dict):
+        deck = {"category": deck}
+    category = _parse_int(deck.get("category"))
+    # Category 60 means Steam Input/gamepad preferred; category 8 is VAC.
+    deck_status = (
+        {0: "unknown", 1: "unsupported", 2: "playable", 3: "supported"}.get(
+            category, "unknown"
+        )
+        if category is not None
+        else "unknown"
+    )
+    return {
+        "categories": parse_appinfo_category_ids(common.get("category")),
+        "accessibility_features": [
+            Category(id=item, name=str(item)) for item in category_ids if 64 <= item <= 79
+        ],
+        "vac_enabled": True if 8 in category_ids else None,
+        "gamepad_preferred": True if 60 in category_ids else None,
+        "controller_support": controller_support,
+        "controllers": parse_appinfo_controllers(category_ids),
+        "deck_support": SteamDeckSupport(
+            status=deck_status
+        ),
+    }
+
+
+def parse_appinfo_controllers(category_ids: list[int]) -> list[Controller]:
+    merged: dict[str, Controller] = {}
+    mappings = {
+        55: ("DualShock 4", False, True),
+        56: ("DualShock 4", True, False),
+        57: ("DualSense", False, True),
+        58: ("DualSense", True, False),
+    }
+    for category_id in category_ids:
+        mapped = mappings.get(category_id)
+        if mapped:
+            name, bluetooth, usb = mapped
+            current = merged.get(name)
+            if current is None:
+                merged[name] = Controller(name=name, bluetooth=bluetooth, usb=usb)
+            else:
+                current.bluetooth = current.bluetooth or bluetooth
+                current.usb = current.usb or usb
+    return list(merged.values())
 
 
 def parse_organizations(data: dict[str, Any] | None) -> list[OrganizationCredit]:
@@ -1071,21 +1331,47 @@ def parse_review_language_stats(data: Any) -> list[ReviewLanguageStats]:
     return result
 
 
-def parse_external_reviews(data: dict[str, Any] | None) -> list[ExternalReview]:
+def parse_external_reviews_html(html: str | None) -> list[ExternalReview]:
+    if not html:
+        return []
+    parser = HTMLParser(html)
+    node = parser.css_first("#game_area_reviews")
+    if node is None:
+        return []
+    raw = node.html or ""
+    result: list[ExternalReview] = []
+    anchor_re = re.compile(
+        r"(?P<quote>[^<]{10,}?)\s*<br\s*/?>\s*"
+        r"(?P<rating>(?:\d+(?:\.\d+)?\s*/\s*\d+)?)?[^<]*"
+        r"<a\s+href=[\"'](?P<url>[^\"']+)[\"'][^>]*>\s*"
+        r"(?P<organization>[^<]+?)\s*</a>",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for match in anchor_re.finditer(raw):
+        url = match.group("url")
+        parsed = urlparse(url)
+        if parsed.path.endswith("/linkfilter/"):
+            target = parse_qs(parsed.query).get("u", [None])[0]
+            if target:
+                url = unquote(target)
+        quote = re.sub(r"^(?:p>|br>)\s*", "", match.group("quote"), flags=re.IGNORECASE)
+        result.append(
+            ExternalReview(
+                organization=plain_text(match.group("organization")),
+                rating=plain_text(match.group("rating")) or None,
+                url=_optional_url(url),
+                quote=plain_text(quote),
+            )
+        )
+    return result
+
+
+def parse_external_reviews(
+    data: dict[str, Any] | None, html: str | None = None
+) -> list[ExternalReview]:
     if not isinstance(data, dict):
         return []
     result: list[ExternalReview] = []
-    metacritic = data.get("metacritic")
-    if isinstance(metacritic, dict):
-        result.append(
-            ExternalReview(
-                organization="metacritic",
-                rating=str(metacritic.get("score"))
-                if metacritic.get("score") is not None
-                else None,
-                url=_optional_url(metacritic.get("url")),
-            )
-        )
     for raw in _as_list(data.get("external_reviews")):
         if not isinstance(raw, dict) or not raw.get("organization"):
             continue
@@ -1097,7 +1383,215 @@ def parse_external_reviews(data: dict[str, Any] | None) -> list[ExternalReview]:
                 quote=raw.get("quote"),
             )
         )
+    result.extend(parse_external_reviews_html(html))
+    unique: list[ExternalReview] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for item in result:
+        key = (item.organization, item.url, item.quote)
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
+def parse_store_browse_item(
+    payload: dict[str, Any] | None,
+    *,
+    price_region: str | None = None,
+) -> dict[str, Any]:
+    """Normalize the public IStoreBrowseService purchase response."""
+
+    if not isinstance(payload, dict):
+        return {}
+    item: dict[str, Any] = payload
+    response = payload.get("response")
+    if isinstance(response, dict):
+        values = response.get("store_items") or response.get("items")
+        if isinstance(values, list) and values and isinstance(values[0], dict):
+            item = values[0]
+    purchase_options = _as_list(item.get("purchase_options"))
+    country = (price_region or "").upper() or None
+    currency_by_country = {
+        "US": "USD",
+        "GB": "GBP",
+        "RU": "RUB",
+        "DE": "EUR",
+        "KZ": "KZT",
+    }
+    currency = currency_by_country.get(country or "")
+    editions: list[EditionInfo] = []
+    edition_prices: list[EditionPrice] = []
+    bundles: list[Bundle] = []
+    bundle_prices: list[BundlePrice] = []
+    for raw in purchase_options:
+        if not isinstance(raw, dict):
+            continue
+        package_id = _parse_int(raw.get("packageid"))
+        bundle_id = _parse_int(raw.get("bundleid"))
+        name = _edition_name({}, raw)
+        recurrence = raw.get("recurrence_info")
+        is_subscription = isinstance(recurrence, dict) or raw.get("package_group") == (
+            "subscriptions"
+        )
+        final = _parse_int(raw.get("final_price_in_cents"))
+        initial = _parse_int(
+            raw.get("initial_price_in_cents", raw.get("price_before_bundle_discount"))
+        )
+        if initial is None and final is not None and not raw.get("bundle_discount_pct"):
+            initial = final
+        discount = _parse_int(raw.get("bundle_discount_pct"))
+        if package_id is not None:
+            editions.append(
+                EditionInfo(
+                    package_id=package_id,
+                    name=name,
+                    package_kind="subscription" if is_subscription else "one_time",
+                )
+            )
+            period_units = None
+            if isinstance(recurrence, dict):
+                period_units = _parse_int(recurrence.get("renewal_time_period"))
+            edition_prices.append(
+                EditionPrice(
+                    package_id=package_id,
+                    currency=currency,
+                    initial=initial,
+                    final=final,
+                    discount_percent=_parse_int(raw.get("discount_pct")),
+                    price_type="recurring" if is_subscription else "one_time",
+                    period="month" if is_subscription else None,
+                    period_units=period_units,
+                    price_region=country,
+                    store_country=country,
+                )
+            )
+        if bundle_id is not None:
+            included_ids: list[int] = []
+            included = item.get("included_items")
+            if isinstance(included, dict):
+                for included_app in _as_list(included.get("included_apps")):
+                    if not isinstance(included_app, dict):
+                        continue
+                    included_package = _parse_int(
+                        (included_app.get("best_purchase_option") or {}).get("packageid")
+                    )
+                    if included_package is not None:
+                        included_ids.append(included_package)
+            bundles.append(
+                Bundle(
+                    bundle_id=bundle_id,
+                    name=name,
+                    discount_percent=discount,
+                    must_purchase_as_set=_parse_bool(raw.get("must_purchase_as_set")),
+                    edition_package_ids=list(dict.fromkeys(included_ids)),
+                )
+            )
+            bundle_prices.append(
+                BundlePrice(
+                    bundle_id=bundle_id,
+                    currency=currency,
+                    discount_percent=discount,
+                    initial=initial,
+                    final=final,
+                    price_region=country,
+                    store_country=country,
+                )
+            )
+    return {
+        "editions": editions,
+        "edition_prices": edition_prices,
+        "bundles": bundles,
+        "bundle_prices": bundle_prices,
+        "media": parse_media(item, language="en"),
+        "supported_languages": parse_store_browse_languages(item.get("supported_languages")),
+    }
+
+
+def parse_store_browse_languages(value: Any) -> list[LanguageSupport]:
+    result: list[LanguageSupport] = []
+    for raw in _as_list(value):
+        if not isinstance(raw, dict):
+            continue
+        name = raw.get("language") or raw.get("name")
+        if not isinstance(name, str):
+            continue
+        web_code, steam_language = _language(name)
+        result.append(
+            LanguageSupport(
+                name=name,
+                web_code=web_code,
+                steam_language=steam_language,
+                interface=_parse_bool(raw.get("supported", raw.get("interface"))),
+                full_audio=_parse_bool(raw.get("full_audio")),
+                subtitles=_parse_bool(raw.get("subtitles")),
+            )
+        )
     return result
+
+
+def merge_app_info(data: dict[str, Any], app_info: dict[str, Any] | None) -> dict[str, Any]:
+    """Overlay public AppInfo fields without replacing localized appdetails."""
+
+    if not isinstance(app_info, dict):
+        return data
+    common_value = app_info.get("common")
+    common: dict[str, Any] = common_value if isinstance(common_value, dict) else {}
+    extended_value = app_info.get("extended")
+    extended: dict[str, Any] = extended_value if isinstance(extended_value, dict) else {}
+    merged = dict(data)
+    for key, value in (
+        ("type", common.get("type")),
+        ("release_state", common.get("releasestate")),
+        ("metacritic_name", common.get("metacritic_name")),
+        ("metacritic_score", common.get("metacritic_score")),
+        ("metacritic_url", common.get("metacritic_fullurl")),
+        ("website", extended.get("homepage")),
+        ("header_image", common.get("header_image")),
+        ("requiredappid", extended.get("requiredappid")),
+    ):
+        if value not in (None, ""):
+            merged[key] = value
+    if isinstance(common.get("category"), (list, dict)):
+        semantics = parse_appinfo_semantics(common)
+        existing_categories = {
+            _field(item, "id"): str(
+                _field(item, "name")
+                or _field(item, "description")
+                or _STEAM_CATEGORY_NAMES.get(_field(item, "id"), _field(item, "id"))
+            )
+            for item in _as_list(data.get("categories"))
+            if _field(item, "id") is not None
+        }
+        for category in semantics["categories"]:
+            category.name = existing_categories.get(
+                category.id,
+                _STEAM_CATEGORY_NAMES.get(category.id, str(category.id)),
+            )
+        for category in semantics["accessibility_features"]:
+            category.name = existing_categories.get(category.id, str(category.id))
+        merged["categories"] = semantics["categories"]
+        merged["accessibility_features"] = semantics["accessibility_features"]
+        merged["controllers"] = semantics["controllers"]
+        merged["vac_enabled"] = semantics["vac_enabled"]
+        merged["gamepad_preferred"] = semantics["gamepad_preferred"]
+        merged["controller_support"] = common.get("controller_support")
+        merged["steam_deck"] = semantics["deck_support"]
+        merged["deck_support"] = semantics["deck_support"]
+    for source_key, target_key in (("developer", "developers"), ("publisher", "publishers")):
+        value = extended.get(source_key)
+        if isinstance(value, str) and value.strip():
+            merged[target_key] = [value.strip()]
+    if isinstance(common.get("supported_languages"), dict):
+        merged["supported_languages_structured"] = parse_appinfo_languages(
+            common["supported_languages"]
+        )
+    if common.get("eulas") is not None:
+        merged["eulas"] = parse_eulas({"eulas": common.get("eulas")})
+    merged["app_info"] = app_info
+    merged["library_assets"] = common.get("library_assets") or common.get("library_assets_full")
+    if "library_assets_full" in common:
+        merged["library_assets_full"] = common["library_assets_full"]
+    return merged
 
 
 def parse_app_details(
@@ -1108,24 +1602,40 @@ def parse_app_details(
     store_country: str | None = None,
     requirements_data: dict[str, Any] | None = None,
     store_html: str | None = None,
+    app_info: dict[str, Any] | None = None,
+    store_browse: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    data = merge_app_info(data, app_info)
+    browse_data: dict[str, Any] = {}
+    if store_browse:
+        browse = parse_store_browse_item(store_browse, price_region=store_country)
+        browse_data = browse
+        for key in ("editions", "edition_prices", "bundles", "bundle_prices"):
+            if browse.get(key):
+                data[key] = browse[key]
+        data["media"] = list(data.get("media", [])) + list(browse.get("media", []))
     minimum_date, maximum_date, release_raw, coming_soon = parse_release_window(
         data.get("release_date")
     )
     requirements_source = requirements_data if requirements_data is not None else data
     package_ids, editions, edition_prices = parse_editions(data)
     bundles, bundle_prices = parse_bundles(data)
+    if browse_data.get("editions"):
+        editions = browse_data["editions"]
+        edition_prices = browse_data.get("edition_prices", [])
+        package_ids = [item.package_id for item in editions]
+    if browse_data.get("bundles"):
+        bundles = browse_data["bundles"]
+        bundle_prices = browse_data.get("bundle_prices", [])
     ratings = data.get("ratings") if isinstance(data.get("ratings"), dict) else {}
     full_description = text_value(data.get("detailed_description"))
     about = text_value(data.get("about_the_game"))
-    parent: dict[str, Any] = {}
-    parent_value = data.get("fullgame")
-    if isinstance(parent_value, dict):
-        parent.update(parent_value)
     relationship = AppRelationship(
         app_id=app_id,
         demo_id=_parse_int(data.get("demoid", data.get("demo_id"))),
-        dlc_for_app_id=_parse_int(data.get("dlcforappid", parent.get("appid"))),
+        # ``fullgame`` identifies the parent of a demo.  It is not a DLC
+        # relationship and must never be copied into dlc_for_app_id.
+        dlc_for_app_id=_parse_int(data.get("dlcforappid")),
         optional_dlc=_parse_bool(data.get("optionaldlc", data.get("optional_dlc"))),
         required_app_id=_parse_int(data.get("requiredappid", data.get("required_appid"))),
     )
@@ -1136,15 +1646,40 @@ def parse_app_details(
     ]
     dlc_ids = [_parse_int(item) for item in _as_list(data.get("dlc"))]
     media = parse_media(data, language=locale.requested)
+    if store_browse:
+        media.extend(
+            parse_store_browse_item(store_browse, price_region=store_country).get("media", [])
+        )
     screenshots = [
         item for item in media if isinstance(item, MediaImage) and item.media_type == "screenshot"
     ]
     videos = [item for item in media if isinstance(item, MediaVideo)]
     categories = parse_features(data)
     accessibility_features = parse_accessibility_features(data, store_html)
+    if isinstance(data.get("accessibility_features"), list):
+        accessibility_features = [
+            Feature(
+                id=_field(item, "id"),
+                name=str(_field(item, "name") or _field(item, "description") or ""),
+            )
+            for item in data["accessibility_features"]
+            if _field(item, "name") or _field(item, "description")
+        ]
     deck_support = parse_steam_deck(data, store_html)
-    eulas = parse_eulas(data, store_html)
-    controllers = parse_controllers(data, store_html)
+    eulas = (
+        data.get("eulas")
+        if isinstance(data.get("eulas"), list)
+        and all(isinstance(item, ThirdPartyEula) for item in data["eulas"])
+        else parse_eulas(
+            {"eulas": data.get("eulas")} if isinstance(data.get("eulas"), list) else data,
+            store_html,
+        )
+    )
+    controllers = (
+        data.get("controllers")
+        if isinstance(data.get("controllers"), list)
+        else parse_controllers(data, store_html)
+    )
     metacritic = data.get("metacritic") if isinstance(data.get("metacritic"), dict) else {}
     return {
         "localized": LocalizedGameInfo(
@@ -1159,7 +1694,7 @@ def parse_app_details(
             full_description=full_description or about,
             legal_notice=text_value(data.get("legal_notice")),
         ),
-        "type": data.get("type"),
+        "type": normalize_steam_type(data.get("type")),
         "app_id": app_id,
         "is_free": _parse_bool(data.get("is_free")),
         "vac_enabled": _parse_bool(data.get("vac_enabled")),
@@ -1186,7 +1721,8 @@ def parse_app_details(
         "coming_soon": coming_soon,
         "release_status": _release_status(data, coming_soon),
         "relationship": relationship,
-        "demo_id": relationship.demo_id,
+        "demo_id": relationship.demo_id
+        or next((item for item in demo_ids if item is not None), None),
         "dlc_for_app_id": relationship.dlc_for_app_id,
         "optional_dlc": relationship.optional_dlc,
         "required_app_id": relationship.required_app_id,
@@ -1203,7 +1739,11 @@ def parse_app_details(
             linux=parse_requirements(requirements_source.get("linux_requirements")),
         ),
         "system_requirements": parse_system_requirements(requirements_source),
-        "supported_languages": parse_languages_fallback(data.get("supported_languages")),
+        "supported_languages": (
+            data.get("supported_languages_structured")
+            if isinstance(data.get("supported_languages_structured"), list)
+            else parse_languages_fallback(data.get("supported_languages"))
+        ),
         "platforms": {
             str(key): bool(value)
             for key, value in (data.get("platforms") or {}).items()
@@ -1240,12 +1780,14 @@ def parse_app_details(
         "review_language_stats": parse_review_language_stats(
             data.get("review_language_stats", data.get("review_languages"))
         ),
-        "external_reviews": parse_external_reviews(data),
+        "external_reviews": parse_external_reviews(data, store_html),
         "metacritic_score": _parse_int(
-            metacritic.get("score") if isinstance(metacritic, dict) else None
+            metacritic.get("score")
+            if isinstance(metacritic, dict)
+            else data.get("metacritic_score")
         ),
         "metacritic_url": _optional_url(
-            metacritic.get("url") if isinstance(metacritic, dict) else None
+            metacritic.get("url") if isinstance(metacritic, dict) else data.get("metacritic_url")
         ),
         "metacritic_name": (
             metacritic.get("name") if isinstance(metacritic, dict) else data.get("metacritic_name")
@@ -1267,6 +1809,7 @@ __all__ = [
     "parse_eulas",
     "parse_external_links",
     "parse_external_reviews",
+    "parse_external_reviews_html",
     "parse_features",
     "parse_language_table",
     "parse_languages_fallback",
@@ -1277,6 +1820,13 @@ __all__ = [
     "parse_release_window",
     "parse_requirements",
     "parse_review_language_stats",
+    "parse_appinfo_category_ids",
+    "parse_appinfo_controllers",
+    "parse_appinfo_languages",
+    "parse_appinfo_semantics",
+    "parse_store_browse_item",
+    "normalize_steam_type",
+    "merge_app_info",
     "parse_steam_deck",
     "parse_system_requirements",
     "parse_tags",

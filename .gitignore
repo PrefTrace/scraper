@@ -230,3 +230,6 @@ __marimo__/
 
 # Large generated Steam metabase; keep benchmark SQLite artifacts separate.
 outputs/steam_metabase/*.sqlite
+# SQLite runtime sidecars are transient and must never enter a commit.
+**/*.sqlite3-shm
+**/*.sqlite3-wal

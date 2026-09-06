@@ -26,7 +26,32 @@ from scraper.pipeline.models import (  # noqa: E402
 from scraper.sources import (  # noqa: E402
     SteamGameSyncService,
 )
-from scraper.steam.orm import SteamApp, SteamOrganizationCredit  # noqa: E402
+from scraper.steam.orm import (  # noqa: E402
+    SteamAccessibilityFeature,
+    SteamAchievement,
+    SteamAchievementLocalization,
+    SteamApp,
+    SteamAppEdition,
+    SteamAppLocalization,
+    SteamBuildBranch,
+    SteamBundle,
+    SteamBundleEdition,
+    SteamBundlePrice,
+    SteamController,
+    SteamDeckSupport,
+    SteamDescriptor,
+    SteamEdition,
+    SteamEditionPrice,
+    SteamEula,
+    SteamExternalReview,
+    SteamFeature,
+    SteamMedia,
+    SteamOrganizationCredit,
+    SteamReview,
+    SteamReviewLanguageStat,
+    SteamSupportedLanguage,
+    SteamSystemRequirement,
+)
 from scraper.wikidata import (  # noqa: E402
     ScraperConfig,
     ScraperDatabase,
@@ -196,6 +221,8 @@ async def _validate_database(
     invalid_facts: list[str] = []
     missing_tasks: list[str] = []
     statuses_by_source: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    semantic_errors: list[str] = []
+    steam_coverage: dict[str, int] = {}
 
     async with database.session() as session:
         all_facts = list((await session.scalars(select(SourceFact))).all())
@@ -208,6 +235,49 @@ async def _validate_database(
         }
         steam_organizations = list(
             (await session.scalars(select(SteamOrganizationCredit))).all()
+        )
+        steam_models = (
+            SteamAppLocalization,
+            SteamMedia,
+            SteamAppEdition,
+            SteamDescriptor,
+            SteamSystemRequirement,
+            SteamFeature,
+            SteamAccessibilityFeature,
+            SteamDeckSupport,
+            SteamEula,
+            SteamController,
+            SteamOrganizationCredit,
+            SteamSupportedLanguage,
+            SteamBuildBranch,
+            SteamReviewLanguageStat,
+            SteamReview,
+            SteamExternalReview,
+            SteamAchievement,
+        )
+        steam_rows_by_table: dict[str, list[Any]] = {}
+        for model in steam_models:
+            rows = list((await session.scalars(select(model))).all())
+            steam_rows_by_table[model.__tablename__] = rows
+            steam_coverage[model.__tablename__] = len(rows)
+
+        steam_editions = list((await session.scalars(select(SteamEdition))).all())
+        steam_edition_prices = list((await session.scalars(select(SteamEditionPrice))).all())
+        steam_bundles = list((await session.scalars(select(SteamBundle))).all())
+        steam_bundle_editions = list((await session.scalars(select(SteamBundleEdition))).all())
+        steam_bundle_prices = list((await session.scalars(select(SteamBundlePrice))).all())
+        steam_achievement_localizations = list(
+            (await session.scalars(select(SteamAchievementLocalization))).all()
+        )
+        steam_coverage.update(
+            {
+                "steam_editions": len(steam_editions),
+                "steam_edition_prices": len(steam_edition_prices),
+                "steam_bundles": len(steam_bundles),
+                "steam_bundle_editions": len(steam_bundle_editions),
+                "steam_bundle_prices": len(steam_bundle_prices),
+                "steam_achievement_localizations": len(steam_achievement_localizations),
+            }
         )
         link_count_by_app: dict[int, int] = defaultdict(int)
         for link in (await session.scalars(select(WikidataGameLink))).all():
@@ -252,6 +322,84 @@ async def _validate_database(
             ).all()
         )
 
+    allowed_types = {"game", "application", "dlc", "soundtrack", "video", "hardware", "demo"}
+    for app in steam_apps.values():
+        if app.type not in allowed_types:
+            semantic_errors.append(f"steam_apps/{app.app_id}: non-canonical type {app.type!r}")
+        if app.demo_id is not None and app.demo_id == app.app_id:
+            semantic_errors.append(f"steam_apps/{app.app_id}: self-referencing demo_id")
+
+    descriptor_names = {
+        1: "Some Nudity or Sexual Content",
+        2: "Frequent Violence or Gore",
+        3: "Adult Only Sexual Content",
+        4: "Frequent Nudity or Sexual Content",
+        5: "General Mature Content",
+    }
+    for descriptor in steam_rows_by_table["steam_descriptors"]:
+        if (
+            descriptor.steam_id in descriptor_names
+            and descriptor.name != descriptor_names[descriptor.steam_id]
+        ):
+            semantic_errors.append(
+                f"steam_descriptors/{descriptor.app_id}/{descriptor.steam_id}: wrong name"
+            )
+    feature_keys = {
+        (row.app_id, row.category_id) for row in steam_rows_by_table["steam_features"]
+    }
+    for row in steam_rows_by_table["steam_accessibility_features"]:
+        if row.category_id is not None and not 64 <= row.category_id <= 79:
+            semantic_errors.append(
+                f"steam_accessibility_features/{row.app_id}/{row.category_id}: outside 64..79"
+            )
+        if (row.app_id, row.category_id) in feature_keys:
+            semantic_errors.append(
+                f"steam category {row.app_id}/{row.category_id}: duplicated in feature tables"
+            )
+    for row in steam_rows_by_table["steam_supported_languages"]:
+        if not row.language:
+            semantic_errors.append(f"steam_supported_languages/{row.app_id}: empty language")
+    for row in steam_rows_by_table["steam_external_reviews"]:
+        if row.organization.casefold() == "metacritic":
+            semantic_errors.append(f"steam_external_reviews/{row.app_id}: metacritic leaked")
+    for row in steam_edition_prices:
+        if row.price_region and row.store_country and row.price_region != row.store_country:
+            semantic_errors.append(
+                f"steam_edition_prices/{row.package_id}: region/country ownership mixed"
+            )
+        if row.price_type == "recurring" and row.period not in {
+            "month",
+            "hour",
+            "day",
+            "week",
+            "year",
+        }:
+            semantic_errors.append(
+                f"steam_edition_prices/{row.package_id}: invalid recurring period"
+            )
+    for row in steam_bundle_prices:
+        if row.price_region and row.store_country and row.price_region != row.store_country:
+            semantic_errors.append(
+                f"steam_bundle_prices/{row.bundle_id}: region/country ownership mixed"
+            )
+    achievement_keys = [
+        (row.app_id, row.achievement_key)
+        for row in steam_rows_by_table["steam_achievements"]
+    ]
+    if len(achievement_keys) != len(set(achievement_keys)):
+        semantic_errors.append("steam_achievements: duplicate core key")
+    achievement_localization_keys = [
+        (row.achievement_id, row.language) for row in steam_achievement_localizations
+    ]
+    if len(achievement_localization_keys) != len(set(achievement_localization_keys)):
+        semantic_errors.append("steam_achievement_localizations: duplicate language key")
+    media_keys = [
+        (row.app_id, row.media_type, row.url, row.language)
+        for row in steam_rows_by_table["steam_media"]
+    ]
+    if len(media_keys) != len(set(media_keys)):
+        semantic_errors.append("steam_media: duplicate media key")
+
     facts_by_app: dict[int, list[SourceFact]] = defaultdict(list)
     for fact in all_facts:
         facts_by_app[fact.steam_app_id].append(fact)
@@ -274,6 +422,15 @@ async def _validate_database(
     for refresh in all_refreshes:
         refreshes_by_app[refresh.steam_app_id].append(refresh)
         statuses_by_source[refresh.source][refresh.status] += 1
+
+    typed_counts_by_app: dict[int, dict[str, int]] = defaultdict(dict)
+    for table_name, rows in steam_rows_by_table.items():
+        for row in rows:
+            row_app_id = getattr(row, "app_id", None)
+            if row_app_id is not None:
+                typed_counts_by_app[int(row_app_id)][table_name] = (
+                    typed_counts_by_app[int(row_app_id)].get(table_name, 0) + 1
+                )
 
     for app_id in app_ids:
         facts = facts_by_app[app_id]
@@ -336,11 +493,13 @@ async def _validate_database(
                     (QUEUE_WIKIDATA, key) in state_keys for key in set(org_expectations)
                 ),
                 "steam_scopes": sorted(source_scopes.get(QUEUE_STEAM, [])),
+                "steam_table_coverage": typed_counts_by_app.get(app_id, {}),
             }
         )
 
     structural_errors = [
         *invalid_facts,
+        *semantic_errors,
         *[f"duplicate SourceFact key: {row}" for row in duplicate_fact_groups],
         *[f"duplicate WikidataGameLink key: {row}" for row in duplicate_link_groups],
     ]
@@ -360,6 +519,8 @@ async def _validate_database(
         "task_completeness_ok": not missing_tasks,
         "source_execution_ok": not source_failures,
         "structural_errors": structural_errors,
+        "semantic_errors": semantic_errors,
+        "steam_table_coverage": steam_coverage,
         "missing_tasks": missing_tasks,
         "source_failures": source_failures,
         "source_not_found": source_not_found,
@@ -549,6 +710,20 @@ def _render_report(benchmark: dict[str, object]) -> str:
                 http_p95=_fmt_seconds(http_timing.get("p95_seconds")),
             )
         )
+
+    lines.extend(
+        [
+            "",
+            "## Покрытие Steam ORM",
+            "",
+            "| Таблица | Строк |",
+            "|---|---:|",
+        ]
+    )
+    coverage = validation.get("steam_table_coverage", {})
+    assert isinstance(coverage, dict)
+    for table_name, count in sorted(coverage.items()):
+        lines.append(f"| {table_name} | {count} |")
 
     lines.extend(
         [

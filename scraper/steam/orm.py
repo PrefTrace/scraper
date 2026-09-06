@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from scraper.wikidata.orm import Base
@@ -34,12 +44,6 @@ class SteamApp(Base):
     external_account_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
     drm_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
     website: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    price_initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    price_final: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    price_discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-
 class SteamAppLocalization(Base):
     __tablename__ = "steam_app_localizations"
 
@@ -47,7 +51,7 @@ class SteamAppLocalization(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     language: Mapped[str] = mapped_column(String(16), primary_key=True)
-    store_country: Mapped[str] = mapped_column(String(2), primary_key=True, default="")
+    store_country: Mapped[str] = mapped_column(String(2), default="", nullable=False)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description_html: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -61,6 +65,9 @@ class SteamAppLocalization(Base):
 
 class SteamMedia(Base):
     __tablename__ = "steam_media"
+    __table_args__ = (
+        UniqueConstraint("app_id", "media_type", "url", "language", name="uq_steam_media"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
@@ -81,6 +88,7 @@ class SteamEdition(Base):
     package_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    package_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class SteamAppEdition(Base):
@@ -100,7 +108,8 @@ class SteamEditionPrice(Base):
     package_id: Mapped[int] = mapped_column(
         ForeignKey("steam_editions.package_id", ondelete="CASCADE"), primary_key=True
     )
-    store_country: Mapped[str] = mapped_column(String(2), primary_key=True, default="")
+    price_region: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
+    store_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -136,7 +145,8 @@ class SteamBundlePrice(Base):
     bundle_id: Mapped[int] = mapped_column(
         ForeignKey("steam_bundles.bundle_id", ondelete="CASCADE"), primary_key=True
     )
-    store_country: Mapped[str] = mapped_column(String(2), primary_key=True, default="")
+    price_region: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
+    store_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -232,7 +242,7 @@ class SteamEula(Base):
     app_id: Mapped[int] = mapped_column(
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), index=True
     )
-    eula_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eula_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -348,6 +358,9 @@ class SteamExternalReview(Base):
 
 class SteamAchievement(Base):
     __tablename__ = "steam_achievements"
+    __table_args__ = (
+        UniqueConstraint("app_id", "achievement_key", name="uq_steam_achievement_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
@@ -359,11 +372,14 @@ class SteamAchievement(Base):
     icon_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     global_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     hidden: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    language: Mapped[str] = mapped_column(String(16), default="")
-
 
 class SteamAchievementLocalization(Base):
     __tablename__ = "steam_achievement_localizations"
+    __table_args__ = (
+        UniqueConstraint(
+            "achievement_id", "language", name="uq_steam_achievement_localization"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     achievement_id: Mapped[int] = mapped_column(

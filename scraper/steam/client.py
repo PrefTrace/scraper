@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -170,3 +171,40 @@ class SteamClient:
         if not isinstance(result, dict):
             raise SteamClientError(f"Steam AppInfo has no app {app_id}")
         return result
+
+    async def store_browse_items(
+        self,
+        app_id: int,
+        locale: LocaleInfo,
+        *,
+        store_country: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch public structured StoreBrowse purchase/media data."""
+
+        input_json = {
+            "ids": [{"appid": app_id}],
+            "context": {
+                "language": locale.steam_language,
+                "country_code": store_country or "US",
+                "steam_realm": 1,
+            },
+            "data_request": {
+                "include_assets": True,
+                "include_release": True,
+                "include_platforms": True,
+                "include_all_purchase_options": True,
+                "include_screenshots": True,
+                "include_trailers": True,
+                "include_basic_info": True,
+                "include_supported_languages": True,
+                "include_included_items": True,
+            },
+        }
+        response = await self._get(
+            "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/",
+            params={"input_json": json.dumps(input_json, separators=(",", ":"))},
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SteamClientError(f"Unexpected Steam StoreBrowse response for app {app_id}")
+        return payload

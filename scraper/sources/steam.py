@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from sqlalchemy import delete, select
 
-from scraper.steam.client import SteamClient
+from scraper.steam.client import SteamClient, SteamClientError
 from scraper.steam.locales import (
     DEFAULT_STORE_COUNTRY,
     LocaleInfo,
@@ -16,15 +17,16 @@ from scraper.steam.locales import (
 )
 from scraper.steam.orm import SteamAppLocalization, SteamOrganizationCredit
 from scraper.steam.parsers import (
-    parse_accessibility_features,
     parse_achievements,
     parse_app_details,
+    parse_appinfo_languages,
+    parse_appinfo_semantics,
     parse_build_branches,
-    parse_controllers,
     parse_eulas,
     parse_external_links,
+    parse_external_reviews,
     parse_language_table,
-    parse_steam_deck,
+    parse_store_browse_item,
     parse_tags,
 )
 from scraper.steam.reviews import _collect_reviews, _fetch_summary
@@ -80,6 +82,34 @@ class SteamGameSyncService(CachedSourceService):
 
         async def run(http: httpx.AsyncClient) -> SteamRefreshResult:
             steam = SteamClient(http)
+            app_info_cache: dict[int, dict[str, Any]] = {}
+            app_info_lock = asyncio.Lock()
+            browse_cache: dict[str, dict[str, Any]] = {}
+            browse_lock = asyncio.Lock()
+
+            async def get_app_info() -> dict[str, Any]:
+                async with app_info_lock:
+                    if app_id not in app_info_cache:
+                        app_info_cache[app_id] = await steam.public_app_info(app_id)
+                    return app_info_cache[app_id]
+
+            async def get_store_browse(locale: LocaleInfo) -> dict[str, Any]:
+                loader = getattr(steam, "store_browse_items", None)
+                if loader is None:
+                    return {}
+                cache_key = f"{locale.steam_language}:{country or 'US'}"
+                async with browse_lock:
+                    if cache_key not in browse_cache:
+                        try:
+                            browse_cache[cache_key] = await loader(
+                                app_id,
+                                locale,
+                                store_country=country,
+                            )
+                        except (SteamClientError, httpx.HTTPError):
+                            browse_cache[cache_key] = {}
+                    return browse_cache[cache_key]
+
             operations: list[Awaitable[SourceRefresh]] = []
             detail_scopes: list[str] = []
             for locale in locales:
@@ -117,13 +147,36 @@ class SteamGameSyncService(CachedSourceService):
                         ):
                             if english_key in requirements_data:
                                 data[english_key] = requirements_data[english_key]
-                    return parse_app_details(
+                    app_info = await get_app_info()
+                    browse = await get_store_browse(locale)
+                    parsed = parse_app_details(
                         data,
                         locale,
                         app_id=app_id,
                         store_country=country,
                         requirements_data=requirements_data,
+                        app_info=app_info,
+                        store_browse=browse,
                     )
+                    if locale.steam_language == "english":
+                        parsed["global_authoritative"] = True
+                    else:
+                        # The requested locale owns only its localized row.
+                        # Global app/package/requirements relations are still
+                        # written from the explicit English response.
+                        english_locale = normalize_locales(["en-US"])[0]
+                        english_browse = await get_store_browse(english_locale)
+                        parsed["global_data"] = parse_app_details(
+                            requirements_data,
+                            english_locale,
+                            app_id=app_id,
+                            store_country=country,
+                            requirements_data=requirements_data,
+                            app_info=app_info,
+                            store_browse=english_browse,
+                        )
+                        parsed["global_authoritative"] = True
+                    return parsed
 
                 async def store_loader(locale: LocaleInfo = locale) -> object:
                     html = await steam.store_page(
@@ -138,14 +191,26 @@ class SteamGameSyncService(CachedSourceService):
                             normalize_locales(["en-US"])[0],
                             store_country=country,
                         )
+                    app_info = await get_app_info()
+                    common = app_info.get("common") if isinstance(app_info, dict) else {}
+                    common = common if isinstance(common, dict) else {}
+                    semantics = parse_appinfo_semantics(common)
+                    structured_languages = parse_appinfo_languages(
+                        common.get("supported_languages")
+                    )
+                    browse = await get_store_browse(locale)
+                    browse_data = parse_store_browse_item(browse, price_region=country)
                     return {
-                        "supported_languages": parse_language_table(html),
+                        "supported_languages": structured_languages
+                        or browse_data.get("supported_languages")
+                        or parse_language_table(html),
                         "tags": parse_tags(html),
                         "external_links": parse_external_links({}, metadata_html),
-                        "accessibility_features": parse_accessibility_features({}, metadata_html),
-                        "deck_support": parse_steam_deck({}, metadata_html),
-                        "eulas": parse_eulas({}, metadata_html),
-                        "controllers": parse_controllers({}, metadata_html),
+                        "external_reviews": parse_external_reviews({}, metadata_html),
+                        "accessibility_features": semantics["accessibility_features"],
+                        "deck_support": semantics["deck_support"],
+                        "eulas": parse_eulas({"eulas": common.get("eulas")}),
+                        "controllers": semantics["controllers"],
                     }
 
                 async def achievement_loader(locale: LocaleInfo = locale) -> object:
@@ -246,7 +311,7 @@ class SteamGameSyncService(CachedSourceService):
             )
 
             async def branches_loader() -> object:
-                payload = await steam.public_app_info(app_id)
+                payload = await get_app_info()
                 return {"branches": parse_build_branches(payload)}
 
             operations.append(
@@ -356,7 +421,7 @@ class SteamGameSyncService(CachedSourceService):
                         )
                     )
                 elif status == "ready":
-                    await remove_steam_scope(session, app_id, scope)
+                    await remove_steam_scope(session, app_id, scope, data)
                     await session.execute(
                         delete(SourceFact).where(
                             SourceFact.source == self.source,

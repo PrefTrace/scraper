@@ -1,0 +1,20 @@
+{
+  "appid": 601360,
+  "common": {
+    "type": "Game",
+    "category": {
+      "category_55": "1",
+      "category_56": "1",
+      "category_57": "1",
+      "category_58": "1",
+      "category_67": "1",
+      "category_79": "1"
+    },
+    "steam_deck_compatibility": {"category": "3"}
+  },
+  "extended": {
+    "requiredappid": "620",
+    "developer": "Second Face Software",
+    "publisher": "Second Face Software"
+  }
+}

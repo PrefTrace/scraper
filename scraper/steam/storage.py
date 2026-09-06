@@ -86,6 +86,11 @@ def _language_from_scope(scope: str) -> str:
     return parts[1] if len(parts) > 1 else ""
 
 
+def _is_english_language(value: str) -> bool:
+    normalized = value.casefold().replace("_", "-")
+    return normalized == "english" or normalized == "en" or normalized.startswith("en-")
+
+
 async def _ensure_app(session: AsyncSession, app_id: int) -> SteamApp:
     app = await session.get(SteamApp, app_id)
     if app is None:
@@ -119,30 +124,21 @@ async def persist_steam_scope(
         await _persist_branches(session, app_id, data)
 
 
-async def remove_steam_scope(session: AsyncSession, app_id: int, scope: str) -> None:
+async def remove_steam_scope(
+    session: AsyncSession,
+    app_id: int,
+    scope: str,
+    data: object | None = None,
+) -> None:
     """Remove the typed rows owned by a refresh scope before replacement."""
 
     kind = scope.split(":", maxsplit=1)[0]
     if kind == "details":
         language = _language_from_scope(scope)
-        country = _country_from_scope(scope)
-        old_package_ids = list(
-            await session.scalars(
-                select(SteamAppEdition.package_id).where(SteamAppEdition.app_id == app_id)
-            )
-        )
-        old_bundle_ids = list(
-            await session.scalars(
-                select(SteamBundleEdition.bundle_id).where(
-                    SteamBundleEdition.package_id.in_(old_package_ids)
-                )
-            )
-        ) if old_package_ids else []
         await session.execute(
             delete(SteamAppLocalization).where(
                 SteamAppLocalization.app_id == app_id,
                 SteamAppLocalization.language == language,
-                SteamAppLocalization.store_country == country,
             )
         )
         await session.execute(
@@ -151,72 +147,62 @@ async def remove_steam_scope(session: AsyncSession, app_id: int, scope: str) -> 
                 SteamMedia.language == language,
             )
         )
-        await session.execute(delete(SteamAppEdition).where(SteamAppEdition.app_id == app_id))
-        if old_package_ids:
-            await session.execute(
-                delete(SteamEditionPrice).where(
-                    SteamEditionPrice.store_country == country,
-                    SteamEditionPrice.package_id.in_(old_package_ids),
-                )
-            )
-        if old_bundle_ids:
-            await session.execute(
-                delete(SteamBundleEdition).where(
-                    SteamBundleEdition.bundle_id.in_(old_bundle_ids)
-                )
-            )
-            await session.execute(
-                delete(SteamBundlePrice).where(
-                    SteamBundlePrice.store_country == country,
-                    SteamBundlePrice.bundle_id.in_(old_bundle_ids),
-                )
-            )
-        for model in (
-            SteamAgeRating,
-            SteamDescriptor,
-            SteamSystemRequirement,
-            SteamFeature,
-            SteamAccessibilityFeature,
-            SteamOrganizationCredit,
-            SteamExternalReview,
-        ):
-            await session.execute(delete(model).where(model.app_id == app_id))
+        # Locale scopes own only localized text/media and their links. Global
+        # metadata is replaced by the English owner below, never by a random
+        # locale or by a country refresh.
+        writes_global = _is_english_language(language) or (
+            isinstance(data, dict) and bool(data.get("global_authoritative"))
+        )
+        if writes_global:
+            for model in (
+                SteamAgeRating,
+                SteamDescriptor,
+                SteamSystemRequirement,
+                SteamFeature,
+                SteamAccessibilityFeature,
+                SteamOrganizationCredit,
+                SteamExternalReview,
+            ):
+                await session.execute(delete(model).where(model.app_id == app_id))
         await session.execute(
             delete(SteamExternalLink).where(
                 SteamExternalLink.app_id == app_id,
-                SteamExternalLink.source_scope.like("details:%"),
+                (
+                    SteamExternalLink.source_scope.like("details:%")
+                    if writes_global
+                    else SteamExternalLink.source_scope == scope
+                ),
             )
         )
     elif kind == "store":
-        await session.execute(
-            delete(SteamSupportedLanguage).where(SteamSupportedLanguage.app_id == app_id)
-        )
+        language = _language_from_scope(scope)
+        if _is_english_language(language):
+            await session.execute(
+                delete(SteamSupportedLanguage).where(SteamSupportedLanguage.app_id == app_id)
+            )
         await session.execute(
             delete(SteamExternalLink).where(
                 SteamExternalLink.app_id == app_id,
-                SteamExternalLink.source_scope.like("store:%"),
+                SteamExternalLink.source_scope == scope,
             )
         )
-        await session.execute(
-            delete(SteamAccessibilityFeature).where(SteamAccessibilityFeature.app_id == app_id)
-        )
-        await session.execute(delete(SteamEula).where(SteamEula.app_id == app_id))
-        await session.execute(delete(SteamController).where(SteamController.app_id == app_id))
+        if _is_english_language(language):
+            await session.execute(
+                delete(SteamAccessibilityFeature).where(SteamAccessibilityFeature.app_id == app_id)
+            )
+            await session.execute(delete(SteamEula).where(SteamEula.app_id == app_id))
+            await session.execute(delete(SteamController).where(SteamController.app_id == app_id))
+            await session.execute(
+                delete(SteamExternalReview).where(SteamExternalReview.app_id == app_id)
+            )
     elif kind == "achievements":
         language = _language_from_scope(scope)
-        ids = select(SteamAchievement.id).where(
-            SteamAchievement.app_id == app_id,
-            SteamAchievement.language == language,
-        )
         await session.execute(
             delete(SteamAchievementLocalization).where(
-                SteamAchievementLocalization.achievement_id.in_(ids)
-            )
-        )
-        await session.execute(
-            delete(SteamAchievement).where(
-                SteamAchievement.app_id == app_id,
-                SteamAchievement.language == language,
+                SteamAchievementLocalization.language == language,
+                SteamAchievementLocalization.achievement_id.in_(
+                    select(SteamAchievement.id).where(SteamAchievement.app_id == app_id)
+                ),
             )
         )
     elif kind == "rating":
@@ -279,44 +265,43 @@ async def _persist_details(
     if not isinstance(data, dict):
         return
     app = await _ensure_app(session, app_id)
-    platforms = data.get("platforms") or {}
-    price = data.get("price")
-    metacritic_score = data.get("metacritic_score")
-    app.type = data.get("type")
-    app.demo_id = data.get("demo_id")
-    app.dlc_for_app_id = data.get("dlc_for_app_id")
-    app.optional_dlc = data.get("optional_dlc")
-    app.required_app_id = data.get("required_app_id")
-    app.windows_build = platforms.get("windows")
-    app.linux_build = platforms.get("linux")
-    app.mac_build = platforms.get("mac")
-    app.vac_enabled = data.get("vac_enabled")
-    app.metacritic_name = data.get("metacritic_name")
-    app.metacritic_score = metacritic_score
-    app.metacritic_url = data.get("metacritic_url")
-    app.gamepad_preferred = data.get("gamepad_preferred")
-    app.controller_support = data.get("controller_support")
-    app.release_date = data.get("release_date")
-    app.release_date_max = data.get("release_date_max")
-    app.release_date_raw = data.get("release_date_raw")
-    app.release_status = data.get("release_status")
-    app.coming_soon = data.get("coming_soon")
-    app.external_account_notice = _text(data.get("external_account_notice"))
-    app.drm_notice = _text(data.get("drm_notice"))
-    app.website = data.get("website")
-    app.price_currency = _field(price, "currency")
-    app.price_initial = _field(price, "initial")
-    app.price_final = _field(price, "final")
-    app.price_discount_percent = _field(price, "discount_percent")
-
     localized = data.get("localized")
     language = _field(localized, "locale") or _language_from_scope(scope)
     country = _field(localized, "store_country") or _country_from_scope(scope)
+    global_data = data.get("global_data")
+    write_global = bool(data.get("global_authoritative", _is_english_language(language)))
+
+    if write_global:
+        source_data = global_data if isinstance(global_data, dict) else data
+        platforms = source_data.get("platforms") or {}
+        metacritic_score = source_data.get("metacritic_score")
+        app.type = source_data.get("type")
+        app.demo_id = source_data.get("demo_id")
+        app.dlc_for_app_id = source_data.get("dlc_for_app_id")
+        app.optional_dlc = source_data.get("optional_dlc")
+        app.required_app_id = source_data.get("required_app_id")
+        app.windows_build = platforms.get("windows")
+        app.linux_build = platforms.get("linux")
+        app.mac_build = platforms.get("mac")
+        app.vac_enabled = source_data.get("vac_enabled")
+        app.metacritic_name = source_data.get("metacritic_name")
+        app.metacritic_score = metacritic_score
+        app.metacritic_url = source_data.get("metacritic_url")
+        app.gamepad_preferred = source_data.get("gamepad_preferred")
+        app.controller_support = source_data.get("controller_support")
+        app.release_date = source_data.get("release_date")
+        app.release_date_max = source_data.get("release_date_max")
+        app.release_date_raw = source_data.get("release_date_raw")
+        app.release_status = source_data.get("release_status")
+        app.coming_soon = source_data.get("coming_soon")
+        app.external_account_notice = _text(source_data.get("external_account_notice"))
+        app.drm_notice = _text(source_data.get("drm_notice"))
+        app.website = source_data.get("website")
+
     await session.execute(
         delete(SteamAppLocalization).where(
             SteamAppLocalization.app_id == app_id,
             SteamAppLocalization.language == language,
-            SteamAppLocalization.store_country == country,
         )
     )
     if isinstance(localized, LocalizedGameInfo) or isinstance(localized, dict):
@@ -347,33 +332,46 @@ async def _persist_details(
             SteamMedia.language == language,
         )
     )
+    seen_media: set[tuple[str, str, str]] = set()
     for item in _items(data.get("media")):
         url = _field(item, "url") or _field(item, "full_url")
         if not url:
             continue
+        media_type = str(_field(item, "type") or _field(item, "media_type") or "unknown")
+        media_language = str(_field(item, "language") or language)
+        media_key = (media_type, str(url), media_language)
+        if media_key in seen_media:
+            continue
+        seen_media.add(media_key)
         session.add(
             SteamMedia(
                 app_id=app_id,
-                media_type=str(_field(item, "type") or _field(item, "media_type") or "unknown"),
+                media_type=media_type,
                 url=str(url),
                 format=_field(item, "format"),
-                language=_field(item, "language") or language,
+                language=media_language,
                 thumbnail_url=_field(item, "thumbnail_url"),
                 full_url=_field(item, "full_url"),
                 media_id=_field(item, "id"),
             )
         )
 
+    if not write_global:
+        return
+
+    # All following relations are global and therefore must be built from the
+    # authoritative English payload, not the requested locale.
+    data = source_data
+
     old_links = await session.scalars(
         select(SteamAppEdition.package_id).where(SteamAppEdition.app_id == app_id)
     )
     old_package_ids = list(old_links)
-    await session.execute(delete(SteamAppEdition).where(SteamAppEdition.app_id == app_id))
     country = _country_from_scope(scope)
     if old_package_ids:
         await session.execute(
             delete(SteamEditionPrice).where(
-                SteamEditionPrice.store_country == country,
+                SteamEditionPrice.price_region == country.upper(),
                 SteamEditionPrice.package_id.in_(old_package_ids),
             )
         )
@@ -391,10 +389,13 @@ async def _persist_details(
             session.add(edition)
         edition.name = _field(item, "name")
         edition.description = _field(item, "description")
+        edition.package_kind = _field(item, "package_kind")
         edition_links.append(package_id)
     await session.flush()
     for package_id in dict.fromkeys(edition_links):
-        session.add(SteamAppEdition(app_id=app_id, package_id=package_id))
+        exists = await session.get(SteamAppEdition, {"app_id": app_id, "package_id": package_id})
+        if exists is None:
+            session.add(SteamAppEdition(app_id=app_id, package_id=package_id))
     for item in _items(data.get("edition_prices")):
         package_id = _field(item, "package_id")
         if package_id is None:
@@ -402,7 +403,8 @@ async def _persist_details(
         session.add(
             SteamEditionPrice(
                 package_id=int(package_id),
-                store_country=country,
+                price_region=str(_field(item, "price_region") or country.upper()),
+                store_country=str(_field(item, "store_country") or country.upper()) or None,
                 currency=_field(item, "currency"),
                 initial=_field(item, "initial"),
                 final=_field(item, "final"),
@@ -414,17 +416,6 @@ async def _persist_details(
         )
     await session.flush()
 
-    old_bundle_ids = await session.scalars(
-        select(SteamBundleEdition.bundle_id).join(
-            SteamAppEdition,
-            SteamAppEdition.package_id == SteamBundleEdition.package_id,
-        ).where(SteamAppEdition.app_id == app_id)
-    )
-    bundle_ids = set(old_bundle_ids)
-    if bundle_ids:
-        await session.execute(
-            delete(SteamBundleEdition).where(SteamBundleEdition.bundle_id.in_(bundle_ids))
-        )
     for item in _items(data.get("bundles")):
         bundle_id = _field(item, "bundle_id")
         if bundle_id is None:
@@ -438,7 +429,29 @@ async def _persist_details(
         bundle.discount_percent = _field(item, "discount_percent")
         bundle.must_purchase_as_set = _field(item, "must_purchase_as_set")
         for package_id in _field(item, "edition_package_ids", []) or []:
-            session.add(SteamBundleEdition(bundle_id=bundle_id, package_id=int(package_id)))
+            package_id = int(package_id)
+            included_edition = await session.get(SteamEdition, package_id)
+            if included_edition is None:
+                session.add(SteamEdition(package_id=package_id))
+                await session.flush()
+            link = await session.get(
+                SteamBundleEdition,
+                {"bundle_id": bundle_id, "package_id": package_id},
+            )
+            if link is None:
+                session.add(SteamBundleEdition(bundle_id=bundle_id, package_id=package_id))
+    bundle_price_ids = [
+        int(_field(item, "bundle_id"))
+        for item in _items(data.get("bundle_prices"))
+        if _field(item, "bundle_id") is not None
+    ]
+    if bundle_price_ids:
+        await session.execute(
+            delete(SteamBundlePrice).where(
+                SteamBundlePrice.price_region == country.upper(),
+                SteamBundlePrice.bundle_id.in_(bundle_price_ids),
+            )
+        )
     for item in _items(data.get("bundle_prices")):
         bundle_id = _field(item, "bundle_id")
         if bundle_id is None:
@@ -446,7 +459,8 @@ async def _persist_details(
         session.add(
             SteamBundlePrice(
                 bundle_id=int(bundle_id),
-                store_country=country,
+                price_region=str(_field(item, "price_region") or country.upper()),
+                store_country=str(_field(item, "store_country") or country.upper()) or None,
                 currency=_field(item, "currency"),
                 discount_percent=_field(item, "discount_percent"),
                 initial=_field(item, "initial"),
@@ -478,6 +492,17 @@ async def _persist_details(
                 name=str(_field(item, "name") or ""),
             )
         )
+    if _items(data.get("descriptors")) and not any(
+        str(_field(item, "age_id") or "") == "steam" for item in _items(data.get("age_ratings"))
+    ):
+        session.add(
+            SteamAgeRating(
+                app_id=app_id,
+                age_id="steam",
+                standard="steam",
+                descriptor_raw="content_descriptors",
+            )
+        )
     for item in _items(data.get("system_requirements")):
         if not isinstance(item, SystemRequirement) and not isinstance(item, dict):
             continue
@@ -490,10 +515,13 @@ async def _persist_details(
             )
         )
     for item in _items(data.get("categories")):
+        category_id = _field(item, "id")
+        if category_id is not None and 64 <= int(category_id) <= 79:
+            continue
         session.add(
             SteamFeature(
                 app_id=app_id,
-                category_id=_field(item, "id"),
+                category_id=category_id,
                 english_name=str(_field(item, "name") or _field(item, "description") or ""),
             )
         )
@@ -546,9 +574,13 @@ async def _persist_store(
 ) -> None:
     if not isinstance(data, dict):
         return
-    await session.execute(
-        delete(SteamSupportedLanguage).where(SteamSupportedLanguage.app_id == app_id)
-    )
+    language_scope = _language_from_scope(scope)
+    if not _is_english_language(language_scope):
+        return
+    if _is_english_language(language_scope):
+        await session.execute(
+            delete(SteamSupportedLanguage).where(SteamSupportedLanguage.app_id == app_id)
+        )
     seen_languages: set[str] = set()
     for item in _items(data.get("supported_languages")):
         language = _field(item, "web_code") or _field(item, "name")
@@ -612,6 +644,19 @@ async def _persist_store(
                 usb=_field(item, "usb"),
             )
         )
+    for item in _items(data.get("external_reviews")):
+        organization = _field(item, "organization")
+        if not organization:
+            continue
+        session.add(
+            SteamExternalReview(
+                app_id=app_id,
+                organization=str(organization),
+                rating=_field(item, "rating"),
+                url=_field(item, "url"),
+                quote=_field(item, "quote"),
+            )
+        )
 
 
 async def _persist_achievements(
@@ -632,26 +677,36 @@ async def _persist_achievements(
         if not key or key in seen:
             continue
         seen.add(str(key))
-        achievement = SteamAchievement(
-            app_id=app_id,
-            achievement_key=str(key),
-            achievement_id=achievement_id,
-            api_name=_field(item, "api_name"),
-            icon_url=_field(item, "icon_url"),
-            global_percent=_field(item, "global_percent"),
-            hidden=_field(item, "hidden"),
-            language=language,
+        achievement = await session.scalar(
+            select(SteamAchievement).where(
+                SteamAchievement.app_id == app_id,
+                SteamAchievement.achievement_key == str(key),
+            )
         )
-        session.add(achievement)
+        if achievement is None:
+            achievement = SteamAchievement(app_id=app_id, achievement_key=str(key))
+            session.add(achievement)
+        achievement.achievement_id = achievement_id
+        achievement.api_name = _field(item, "api_name")
+        achievement.icon_url = _field(item, "icon_url")
+        achievement.global_percent = _field(item, "global_percent")
+        achievement.hidden = _field(item, "hidden")
         await session.flush()
-        session.add(
-            SteamAchievementLocalization(
+        localization = await session.scalar(
+            select(SteamAchievementLocalization).where(
+                SteamAchievementLocalization.achievement_id == achievement.id,
+                SteamAchievementLocalization.language == language,
+            )
+        )
+        if localization is None:
+            localization = SteamAchievementLocalization(
                 achievement_id=achievement.id,
                 language=language,
                 name=str(name or ""),
-                description=_field(item, "description"),
             )
-        )
+            session.add(localization)
+        localization.name = str(name or "")
+        localization.description = _field(item, "description")
 
 
 async def _persist_rating(

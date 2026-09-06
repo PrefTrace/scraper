@@ -1,0 +1,42 @@
+{
+  "appid": 1091500,
+  "common": {
+    "type": "Game",
+    "releasestate": "released",
+    "category": {
+      "category_2": "1",
+      "category_28": "1",
+      "category_55": "1",
+      "category_57": "1",
+      "category_58": "1",
+      "category_64": "1",
+      "category_65": "1",
+      "category_66": "1",
+      "category_67": "1",
+      "category_68": "1",
+      "category_69": "1",
+      "category_70": "1",
+      "category_74": "1",
+      "category_78": "1",
+      "category_79": "1"
+    },
+    "steam_deck_compatibility": {"category": "3"},
+    "eulas": {
+      "0": {
+        "id": "1091500_eula_0",
+        "name": "Cyberpunk 2077 EULA",
+        "url": "https://store.steampowered.com//eula/1091500_eula_0",
+        "version": "10"
+      }
+    },
+    "supported_languages": {
+      "english": {"supported": "true", "full_audio": "true", "subtitles": "true"},
+      "russian": {"supported": "true", "full_audio": "false", "subtitles": "true"}
+    }
+  },
+  "extended": {
+    "developer": "CD PROJEKT RED",
+    "publisher": "CD PROJEKT RED",
+    "homepage": "https://www.cyberpunk.net"
+  }
+}
