@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from sqlalchemy import delete, select
 
+from scraper.models import TagLocalization
 from scraper.steam.client import SteamClient, SteamClientError
 from scraper.steam.locales import (
     LocaleInfo,
@@ -112,6 +113,7 @@ class SteamGameSyncService(CachedSourceService):
             achievement_percentages_lock = asyncio.Lock()
             category_registries: dict[str, dict[int, str]] = {}
             category_registry_lock = asyncio.Lock()
+            pics_metadata_unavailable = False
 
             async def get_app_info(target_app_id: int = app_id) -> dict[str, Any]:
                 async with app_info_lock:
@@ -159,6 +161,8 @@ class SteamGameSyncService(CachedSourceService):
                 parsed = parse_store_browse_item(browse, language=locale.web_language)
                 bundles = parsed.get("bundles", [])
                 memberships: dict[int, list[int]] = {}
+                membership_status: dict[int, bool] = {}
+                membership_diagnostics: list[dict[str, str]] = []
                 for bundle in bundles:
                     bundle_id = getattr(bundle, "bundle_id", None)
                     if bundle_id is None:
@@ -167,8 +171,23 @@ class SteamGameSyncService(CachedSourceService):
                     found_id, package_ids = parse_bundle_membership(bundle_payload)
                     if found_id is not None:
                         memberships[found_id] = package_ids
+                        membership_status[found_id] = True
+                    else:
+                        membership_status[int(bundle_id)] = False
+                        membership_diagnostics.append(
+                            {
+                                "code": "steam_bundle_membership_fetch_unavailable",
+                                "message": (
+                                    f"Bundle {int(bundle_id)} membership response was unavailable; "
+                                    "existing membership was preserved"
+                                ),
+                            }
+                        )
                 enriched = dict(browse)
                 enriched["_bundle_memberships"] = memberships
+                enriched["_bundle_membership_fetch_status"] = membership_status
+                enriched["_bundle_price_fetch_status"] = dict(membership_status)
+                enriched["_bundle_membership_diagnostics"] = membership_diagnostics
                 return enriched
 
             async def get_package_metadata_raw(
@@ -219,6 +238,74 @@ class SteamGameSyncService(CachedSourceService):
                     resolved_ids | bundle_ids,
                     locale,
                 )
+                nonlocal pics_metadata_unavailable
+                pics_loader = getattr(steam, "pics_package_info", None)
+                if pics_loader is not None and resolved_ids | bundle_ids:
+                    try:
+                        pics_metadata = await pics_loader(sorted(resolved_ids | bundle_ids))
+                    except SteamClientError as exc:
+                        message = str(exc).casefold()
+                        if any(token in message for token in ("token", "auth", "denied", "login")):
+                            code = "steam_pics_token_required"
+                        elif "field" in message:
+                            code = "steam_pics_fields_unavailable"
+                        else:
+                            code = "steam_pics_source_unavailable"
+                        if not pics_metadata_unavailable:
+                            parsed.setdefault("diagnostics", []).append(
+                                {
+                                    "code": code,
+                                    "message": f"Anonymous PICS package source unavailable: {exc}",
+                                }
+                            )
+                            pics_metadata_unavailable = True
+                        pics_metadata = {}
+                    except (httpx.HTTPError, TypeError) as exc:
+                        if not pics_metadata_unavailable:
+                            parsed.setdefault("diagnostics", []).append(
+                                {
+                                    "code": "steam_pics_source_unavailable",
+                                    "message": f"Anonymous PICS package source unavailable: {exc}",
+                                }
+                            )
+                            pics_metadata_unavailable = True
+                        pics_metadata = {}
+                    if isinstance(pics_metadata, dict):
+                        for package_id, metadata in pics_metadata.items():
+                            if isinstance(metadata, dict):
+                                merged = dict(package_metadata.get(package_id, {}))
+                                merged.update(metadata)
+                                package_metadata[package_id] = merged
+                        missing_pics = (resolved_ids | bundle_ids) - set(pics_metadata)
+                        if missing_pics and not pics_metadata_unavailable:
+                            parsed.setdefault("diagnostics", []).append(
+                                {
+                                    "code": "steam_pics_fields_unavailable",
+                                    "message": (
+                                        "PICS responded without package fields for: "
+                                        + ", ".join(str(item) for item in sorted(missing_pics))
+                                    ),
+                                }
+                            )
+                        restriction_fields_present = any(
+                            isinstance(metadata, dict)
+                            and any(
+                                str(key).casefold().replace("_", "")
+                                in {"onlyallowrunincountries", "prohibitrunincountries"}
+                                for key in metadata
+                            )
+                            for metadata in pics_metadata.values()
+                        )
+                        if pics_metadata and not restriction_fields_present:
+                            parsed.setdefault("diagnostics", []).append(
+                                {
+                                    "code": "steam_pics_fields_unavailable",
+                                    "message": (
+                                        "PICS package response did not expose runtime "
+                                        "restriction fields"
+                                    ),
+                                }
+                            )
                 parsed["edition_metadata"] = parse_package_metadata(package_metadata)
                 parsed.setdefault("diagnostics", []).extend(
                     annotate_package_price_observations(
@@ -422,12 +509,59 @@ class SteamGameSyncService(CachedSourceService):
                         for item in html_tag_localizations
                         if (item.tag_id, item.language) not in known_localizations
                     )
+                    tag_ids = sorted(
+                        {
+                            int(item.tag_id)
+                            for item in tags
+                            if getattr(item, "tag_id", None) is not None
+                        }
+                    )
+                    tag_localization_loader = getattr(steam, "localized_tag_names", None)
+                    if tag_ids and tag_localization_loader is not None:
+                        try:
+                            resolved_names = await tag_localization_loader(tag_ids, locale)
+                        except (SteamClientError, httpx.HTTPError, TypeError) as exc:
+                            diagnostics = [
+                                {
+                                    "code": "steam_tag_localization_source_unavailable",
+                                    "message": f"Steam structured tag localization failed: {exc}",
+                                }
+                            ]
+                            resolved_names = {}
+                        else:
+                            diagnostics = []
+                        known_localizations = {
+                            (item.tag_id, item.language) for item in tag_localizations
+                        }
+                        for tag_id, name in resolved_names.items():
+                            if (tag_id, locale.web_language) not in known_localizations:
+                                tag_localizations.append(
+                                    TagLocalization(
+                                        tag_id=tag_id,
+                                        language=locale.web_language,
+                                        name=name,
+                                    )
+                                )
+                        unresolved_tag_ids = [
+                            tag_id for tag_id in tag_ids if tag_id not in resolved_names
+                        ]
+                        if unresolved_tag_ids and resolved_names:
+                            diagnostics.append(
+                                {
+                                    "code": "steam_tag_localization_unresolved",
+                                    "message": (
+                                        "Steam did not resolve tag IDs: "
+                                        + ", ".join(str(item) for item in unresolved_tag_ids)
+                                    ),
+                                }
+                            )
+                    else:
+                        diagnostics = []
                     supported_languages = (
                         structured_languages
                         or browse_data.get("supported_languages")
                         or parse_language_table(html)
                     )
-                    diagnostics: list[dict[str, str]] = []
                     for item in supported_languages:
                         if getattr(item, "web_code", None):
                             continue

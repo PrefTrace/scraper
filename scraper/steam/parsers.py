@@ -677,12 +677,11 @@ def _structured_tag_values(data: dict[str, Any]) -> list[tuple[int, str | None, 
     result: list[tuple[int, str | None, int | None]] = []
     for raw_values in candidates:
         if isinstance(raw_values, dict):
-            values = [
-                {"tag_id": key, **value}
-                if isinstance(value, dict)
-                else {"tag_id": key, "name": value}
-                for key, value in raw_values.items()
-            ]
+            # AppInfo has historically exposed several unrelated maps under
+            # names such as ``tags``.  A map key is not a Steam tag id unless
+            # the source explicitly labels it as one; in particular, do not
+            # turn an arbitrary positional/name map into ids 0..19.
+            values = [value for value in raw_values.values() if isinstance(value, dict)]
         else:
             values = _as_list(raw_values)
         for raw in values:
@@ -1356,7 +1355,13 @@ def parse_bundles(
             Bundle(
                 bundle_id=bundle_id,
                 name=raw.get("name") if isinstance(raw.get("name"), str) else None,
-                discount_percent=_parse_int(raw.get("discount_pct", raw.get("discount_percent"))),
+                # An authoritative bundle response with no configured/static
+                # discount means "no static discount", not unknown.
+                discount_percent=_parse_int(
+                    raw.get("discount_pct", raw.get("discount_percent"))
+                )
+                if raw.get("discount_pct", raw.get("discount_percent")) is not None
+                else 0,
                 must_purchase_as_set=_parse_bool(raw.get("must_purchase_as_set")),
                 # Membership is intentionally absent here.  AppDetails and
                 # app-level StoreBrowse data do not identify the contents of
@@ -1558,13 +1563,36 @@ def normalize_descriptor_text(
     if title:
         subject_text = plain_text(title).strip()
         if subject_text:
-            subject = re.escape(subject_text)
-            text = re.sub(
-                rf"^\s*{subject}\s+(?:contains|contain|includes|has)\s+",
-                "",
-                text,
-                flags=re.IGNORECASE,
+            title_variants = [subject_text]
+            without_article = re.sub(r"^the\s+", "", subject_text, flags=re.IGNORECASE)
+            if without_article != subject_text:
+                title_variants.append(without_article)
+            edition_suffix = re.compile(
+                r"\s*(?:-|\(|:)\s*"
+                r"(?:complete|goty|game of the year|deluxe|ultimate|gold|definitive|standard)"
+                r"(?:\s+edition)?\s*\)?$",
+                re.IGNORECASE,
             )
+            without_edition = edition_suffix.sub("", subject_text).strip()
+            if without_edition != subject_text:
+                title_variants.append(without_edition)
+                without_edition_article = re.sub(
+                    r"^the\s+", "", without_edition, flags=re.IGNORECASE
+                )
+                if without_edition_article != without_edition:
+                    title_variants.append(without_edition_article)
+            for variant in sorted(set(title_variants), key=len, reverse=True):
+                subject = re.escape(variant)
+                updated = re.sub(
+                    rf"^\s*{subject}(?=\s|[-:()]|$)\s*(?:contains|contain|includes|has)?\s*",
+                    "",
+                    text,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                if updated != text:
+                    text = updated
+                    break
     fragments = re.split(r"\s*(?:\r?\n|;|,|\.|/|\\|\||\band\b|\bor\b)\s*", text, flags=re.I)
     result: list[str] = []
     for fragment in fragments:
@@ -2003,6 +2031,22 @@ def _depot_os_values(config: dict[str, Any]) -> list[str]:
     ]
 
 
+def _depot_language_value(config: dict[str, Any]) -> str | None:
+    raw_language = config.get("language")
+    if raw_language is None or not str(raw_language).strip():
+        return None
+    return normalize_steam_language(str(raw_language))
+
+
+def _depot_language_key(config: dict[str, Any]) -> str | None:
+    """Return a profile grouping key, retaining unknown raw values privately."""
+
+    raw_language = config.get("language")
+    if raw_language is None or not str(raw_language).strip():
+        return None
+    return normalize_steam_language(str(raw_language)) or str(raw_language).strip().casefold()
+
+
 def _shared_depot_raw(
     depot_id: int,
     raw: dict[str, Any],
@@ -2026,7 +2070,15 @@ def parse_depots(
 ) -> dict[str, list[Any]]:
     """Normalize public AppInfo depots and resolve public shared-depot manifests."""
 
-    empty = {"depots": [], "depot_os": [], "manifests": [], "app_depots": [], "diagnostics": []}
+    empty = {
+        "depots": [],
+        "depot_os": [],
+        "manifests": [],
+        "app_depots": [],
+        "manifest_authoritative_depot_ids": [],
+        "unresolved_shared_depot_ids": [],
+        "diagnostics": [],
+    }
     if not isinstance(data, dict) or not isinstance(data.get("depots"), dict):
         return empty
     from scraper.models import Depot, DepotManifest
@@ -2036,6 +2088,8 @@ def parse_depots(
     depot_os: list[tuple[int, str]] = []
     manifests: list[DepotManifest] = []
     app_depots: list[int] = []
+    manifest_authoritative_depot_ids: list[int] = []
+    unresolved_shared_depot_ids: list[int] = []
     diagnostics: list[dict[str, str]] = []
     for raw_id, raw in raw_depots.items():
         depot_id = _parse_int(raw_id)
@@ -2043,8 +2097,10 @@ def parse_depots(
             continue
         config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
         raw_language = config.get("language")
-        language = normalize_steam_language(str(raw_language)) if raw_language is not None else None
-        if raw_language is not None and language is None:
+        language = _depot_language_value(config)
+        if raw_language is not None and str(raw_language).strip() and normalize_steam_language(
+            str(raw_language)
+        ) is None:
             diagnostics.append(
                 {
                     "code": "unknown_steam_depot_language",
@@ -2079,6 +2135,7 @@ def parse_depots(
         if not isinstance(raw.get("manifests"), dict) and depot_from_app is not None:
             shared_raw = _shared_depot_raw(depot_id, raw, shared_app_infos)
             if shared_raw is None:
+                unresolved_shared_depot_ids.append(depot_id)
                 diagnostics.append(
                     {
                         "code": "steam_shared_depot_unresolved",
@@ -2092,6 +2149,7 @@ def parse_depots(
                 manifest_owner = shared_raw
         raw_manifests = manifest_owner.get("manifests")
         if isinstance(raw_manifests, dict):
+            manifest_authoritative_depot_ids.append(depot_id)
             for branch, manifest in raw_manifests.items():
                 if not isinstance(branch, str) or not isinstance(manifest, dict):
                     continue
@@ -2111,15 +2169,17 @@ def parse_depots(
         "depot_os": depot_os,
         "manifests": manifests,
         "app_depots": app_depots,
+        "manifest_authoritative_depot_ids": manifest_authoritative_depot_ids,
+        "unresolved_shared_depot_ids": unresolved_shared_depot_ids,
         "diagnostics": diagnostics,
     }
 
 
 def _install_size(value: Any) -> int | None:
-    """Keep a real zero; only an absent/non-numeric size is unknown."""
+    """Normalize Steam manifest placeholders to domain NULL."""
 
     parsed = _parse_int(value)
-    return parsed if parsed is not None and parsed >= 0 else None
+    return parsed if parsed is not None and parsed > 0 else None
 
 
 def _branch_size_profiles(
@@ -2136,7 +2196,9 @@ def _branch_size_profiles(
     """
 
     raw_depots = data.get("depots") if isinstance(data.get("depots"), dict) else {}
-    records: list[tuple[int, dict[str, Any], dict[str, Any], dict[str, Any] | None]] = []
+    records: list[
+        tuple[int, dict[str, Any], dict[str, Any], dict[str, Any] | None, bool]
+    ] = []
     for raw_id, raw in raw_depots.items():
         depot_id = _parse_int(raw_id)
         if depot_id is None or not isinstance(raw, dict):
@@ -2145,16 +2207,34 @@ def _branch_size_profiles(
             continue
         config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
         manifest_owner = raw
+        shared_unresolved = False
         if not isinstance(raw.get("manifests"), dict):
-            manifest_owner = _shared_depot_raw(depot_id, raw, shared_app_infos) or raw
+            if _parse_int(raw.get("depotfromapp", raw.get("depot_from_app"))) is not None:
+                shared_candidate = _shared_depot_raw(depot_id, raw, shared_app_infos)
+                if shared_candidate is None:
+                    shared_unresolved = True
+                else:
+                    manifest_owner = shared_candidate
+            else:
+                # A normal depot without a manifest for this branch is not
+                # proof that it belongs to the branch.
+                continue
         manifests = manifest_owner.get("manifests")
         manifest = manifests.get(branch_name) if isinstance(manifests, dict) else None
-        records.append((depot_id, raw, config, manifest if isinstance(manifest, dict) else None))
+        records.append(
+            (
+                depot_id,
+                raw,
+                config,
+                manifest if isinstance(manifest, dict) else None,
+                shared_unresolved,
+            )
+        )
     if not records:
         return [], []
 
     os_names = sorted(
-        {os_name for _, _, config, _ in records for os_name in _depot_os_values(config)}
+        {os_name for _, _, config, _, _ in records for os_name in _depot_os_values(config)}
     )
     os_profiles = os_names or ["unknown"]
     downloads: list[int] = []
@@ -2168,7 +2248,7 @@ def _branch_size_profiles(
         architectures = sorted(
             {
                 str(config.get("osarch")).strip().casefold()
-                for _, _, config, _ in os_records
+                for _, _, config, _, _ in os_records
                 if config.get("osarch") is not None and str(config.get("osarch")).strip()
             }
         ) or ["unknown"]
@@ -2181,34 +2261,31 @@ def _branch_size_profiles(
             ]
             languages = sorted(
                 {
-                    normalize_steam_language(str(config.get("language")))
-                    or str(config.get("language")).strip().casefold()
-                    for _, _, config, _ in architecture_records
-                    if config.get("language") is not None and str(config.get("language")).strip()
+                    _depot_language_key(config)
+                    for _, _, config, _, _ in architecture_records
+                    if _depot_language_key(config) is not None
                 }
             ) or ["unknown"]
             for language in languages:
                 selected = [
                     record
                     for record in architecture_records
-                    if record[2].get("language") is None
-                    or (
-                        normalize_steam_language(str(record[2].get("language")))
-                        or str(record[2].get("language")).strip().casefold()
-                    )
-                    == language
+                    if _depot_language_key(record[2]) is None
+                    or _depot_language_key(record[2]) == language
                 ]
                 if not selected:
                     continue
                 downloads_for_profile = [
                     _install_size(manifest.get("download")) if manifest is not None else None
-                    for _, _, _, manifest in selected
+                    if not shared_unresolved
+                    else None
+                    for _, _, _, manifest, shared_unresolved in selected
                 ]
                 disks_for_profile = [
                     _install_size(manifest.get("size", manifest.get("disk")))
-                    if manifest is not None
+                    if manifest is not None and not shared_unresolved
                     else None
-                    for _, _, _, manifest in selected
+                    for _, _, _, manifest, shared_unresolved in selected
                 ]
                 if all(value is not None for value in downloads_for_profile):
                     downloads.append(
@@ -2397,6 +2474,9 @@ def parse_store_browse_item(
     currency: str | None = None,
     price_region: str | None = None,
     bundle_memberships: dict[int, list[int]] | None = None,
+    bundle_membership_fetch_status: dict[int, bool] | None = None,
+    bundle_price_fetch_status: dict[int, bool] | None = None,
+    bundle_membership_diagnostics: list[dict[str, str]] | None = None,
     language: str = "en",
 ) -> dict[str, Any]:
     """Normalize the public IStoreBrowseService purchase response."""
@@ -2500,7 +2580,9 @@ def parse_store_browse_item(
                 Bundle(
                     bundle_id=bundle_id,
                     name=name,
-                    discount_percent=static_bundle_discount,
+                    discount_percent=(
+                        static_bundle_discount if static_bundle_discount is not None else 0
+                    ),
                     must_purchase_as_set=_parse_bool(raw.get("must_purchase_as_set")),
                     edition_package_ids=list(dict.fromkeys(included_ids)),
                 )
@@ -2535,6 +2617,9 @@ def parse_store_browse_item(
         "tag_localizations": tag_localizations,
         "organizations": parse_organizations(item.get("basic_info")),
         "price_diagnostics": price_diagnostics,
+        "bundle_membership_fetch_status": bundle_membership_fetch_status or {},
+        "bundle_price_fetch_status": bundle_price_fetch_status or {},
+        "bundle_membership_diagnostics": bundle_membership_diagnostics or [],
     }
 
 
@@ -2872,6 +2957,15 @@ def parse_app_details(
             bundle_memberships=store_browse.get("_bundle_memberships")
             if isinstance(store_browse, dict)
             else None,
+            bundle_membership_fetch_status=store_browse.get("_bundle_membership_fetch_status")
+            if isinstance(store_browse, dict)
+            else None,
+            bundle_price_fetch_status=store_browse.get("_bundle_price_fetch_status")
+            if isinstance(store_browse, dict)
+            else None,
+            bundle_membership_diagnostics=store_browse.get("_bundle_membership_diagnostics")
+            if isinstance(store_browse, dict)
+            else None,
             language=locale.web_language,
         )
         browse_data = browse
@@ -3072,7 +3166,14 @@ def parse_app_details(
         "package_ids": package_ids,
         "bundles": bundles,
         "bundle_prices": bundle_prices,
-        "diagnostics": list(browse_data.get("price_diagnostics", [])),
+        "bundle_membership_fetch_status": browse_data.get(
+            "bundle_membership_fetch_status", {}
+        ),
+        "bundle_price_fetch_status": browse_data.get("bundle_price_fetch_status", {}),
+        "diagnostics": [
+            *browse_data.get("price_diagnostics", []),
+            *browse_data.get("bundle_membership_diagnostics", []),
+        ],
         "external_links": parse_external_links(data, store_html)
         + list(browse_data.get("external_links", [])),
         "deck_support": deck_support,

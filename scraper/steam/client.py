@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -182,6 +183,84 @@ class SteamClient:
                     registry[category_id] = name.strip()
             _CATEGORY_REGISTRIES[language] = registry
             return dict(registry)
+
+    async def localized_tag_names(
+        self,
+        tag_ids: Sequence[int],
+        locale: LocaleInfo,
+    ) -> dict[int, str]:
+        """Resolve encountered tag IDs through Steam's structured endpoint."""
+
+        normalized = list(dict.fromkeys(int(tag_id) for tag_id in tag_ids))
+        result: dict[int, str] = {}
+        for offset in range(0, len(normalized), 100):
+            chunk = normalized[offset : offset + 100]
+            response = await self._get(
+                "https://api.steampowered.com/IStoreService/GetLocalizedNameForTags/v1/",
+                params={
+                    "input_json": json.dumps(
+                        {
+                            "language": locale.steam_language,
+                            "tagids": chunk,
+                        },
+                        separators=(",", ":"),
+                    )
+                },
+            )
+            payload = response.json()
+            response_data = payload.get("response") if isinstance(payload, dict) else None
+            rows = response_data.get("tags") if isinstance(response_data, dict) else None
+            for raw in rows if isinstance(rows, list) else []:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    tag_id = int(raw.get("tagid", raw.get("tag_id")))
+                except (TypeError, ValueError):
+                    continue
+                name = raw.get("name") or raw.get("localized_name")
+                if isinstance(name, str) and name.strip():
+                    result[tag_id] = name.strip()
+        return result
+
+    async def pics_package_info(
+        self,
+        package_ids: Sequence[int],
+    ) -> dict[int, dict[str, Any]]:
+        """Try an explicitly configured anonymous PICS HTTP bridge.
+
+        Steam's native anonymous ProductInfo transport is a client protocol,
+        not a stable public HTTP endpoint.  Therefore no third-party host is
+        silently selected: deployments may provide ``STEAM_PICS_API_URL``.
+        """
+
+        base_url = os.getenv("STEAM_PICS_API_URL", "").strip()
+        if not base_url:
+            raise SteamClientError("STEAM_PICS_API_URL is not configured")
+        normalized = list(dict.fromkeys(int(package_id) for package_id in package_ids))
+        if not normalized:
+            return {}
+        info_url = base_url.rstrip("/")
+        if not info_url.casefold().endswith("/info"):
+            info_url = f"{info_url}/info"
+        response = await self._get(info_url, params={"packages": ",".join(map(str, normalized))})
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SteamClientError("Steam PICS bridge returned an unexpected response")
+        raw_packages = payload.get("packages")
+        if not isinstance(raw_packages, dict):
+            error = payload.get("error")
+            if isinstance(error, str) and error.strip():
+                raise SteamClientError(error.strip())
+            raise SteamClientError("Steam PICS bridge did not return package fields")
+        result: dict[int, dict[str, Any]] = {}
+        for raw_id, value in raw_packages.items():
+            try:
+                package_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(value, dict):
+                result[package_id] = value
+        return result
 
     async def store_app_list_page(
         self,

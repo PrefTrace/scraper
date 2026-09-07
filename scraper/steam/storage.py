@@ -147,6 +147,25 @@ async def _ensure_app(session: AsyncSession, app_id: int) -> SteamApp:
     return app
 
 
+async def _gc_orphan_depots(session: AsyncSession) -> None:
+    """Remove depot rows no longer referenced by any app."""
+
+    orphan_ids = list(
+        await session.scalars(
+            select(SteamDepot.depot_id).where(
+                ~SteamDepot.depot_id.in_(select(SteamAppDepot.depot_id))
+            )
+        )
+    )
+    if not orphan_ids:
+        return
+    await session.execute(delete(SteamDepotOs).where(SteamDepotOs.depot_id.in_(orphan_ids)))
+    await session.execute(
+        delete(SteamDepotManifest).where(SteamDepotManifest.depot_id.in_(orphan_ids))
+    )
+    await session.execute(delete(SteamDepot).where(SteamDepot.depot_id.in_(orphan_ids)))
+
+
 async def persist_steam_scope(
     session: AsyncSession,
     app_id: int,
@@ -268,7 +287,6 @@ async def remove_steam_scope(
         )
     elif kind == "branches":
         await session.execute(delete(SteamBuildBranch).where(SteamBuildBranch.app_id == app_id))
-        await session.execute(delete(SteamAppDepot).where(SteamAppDepot.app_id == app_id))
 
 
 async def remove_all_steam_data(session: AsyncSession, app_id: int) -> None:
@@ -319,6 +337,7 @@ async def remove_all_steam_data(session: AsyncSession, app_id: int) -> None:
         delete(SteamBundlePrice).where(SteamBundlePrice.bundle_id.in_(orphan_bundles))
     )
     await session.execute(delete(SteamBundle).where(SteamBundle.bundle_id.in_(orphan_bundles)))
+    await _gc_orphan_depots(session)
 
 
 async def _persist_details(
@@ -537,12 +556,39 @@ async def _persist_details(
         for item in _items(data.get("bundles"))
         if _field(item, "bundle_id") is not None
     }
-    if current_bundle_ids:
+    raw_bundle_status = data.get("bundle_membership_fetch_status")
+    if isinstance(raw_bundle_status, dict) and raw_bundle_status:
+        authoritative_bundle_ids = {
+            bundle_id
+            for bundle_id in current_bundle_ids
+            if raw_bundle_status.get(bundle_id, raw_bundle_status.get(str(bundle_id))) is True
+        }
+    else:
+        # Parser fixtures and legacy callers without a status map represent a
+        # successful authoritative response.
+        authoritative_bundle_ids = set(current_bundle_ids)
+    raw_bundle_price_status = data.get("bundle_price_fetch_status")
+    if isinstance(raw_bundle_price_status, dict) and raw_bundle_price_status:
+        authoritative_bundle_price_ids = {
+            bundle_id
+            for bundle_id in current_bundle_ids
+            if raw_bundle_price_status.get(
+                bundle_id, raw_bundle_price_status.get(str(bundle_id))
+            )
+            is True
+        }
+    else:
+        authoritative_bundle_price_ids = set(current_bundle_ids)
+    if authoritative_bundle_ids:
         await session.execute(
-            delete(SteamBundleEdition).where(SteamBundleEdition.bundle_id.in_(current_bundle_ids))
+            delete(SteamBundleEdition).where(
+                SteamBundleEdition.bundle_id.in_(authoritative_bundle_ids)
+            )
         )
         await session.execute(
-            delete(SteamBundlePrice).where(SteamBundlePrice.bundle_id.in_(current_bundle_ids))
+            delete(SteamBundlePrice).where(
+                SteamBundlePrice.bundle_id.in_(authoritative_bundle_ids)
+            )
         )
     for item in _items(data.get("bundles")):
         bundle_id = _field(item, "bundle_id")
@@ -556,7 +602,12 @@ async def _persist_details(
         bundle.name = _text(_field(item, "name"))
         bundle.discount_percent = _field(item, "discount_percent")
         bundle.must_purchase_as_set = _field(item, "must_purchase_as_set")
-        for package_id in _field(item, "edition_package_ids", []) or []:
+        membership_is_authoritative = bundle_id in authoritative_bundle_ids
+        for package_id in (
+            _field(item, "edition_package_ids", []) or []
+            if membership_is_authoritative
+            else []
+        ):
             package_id = int(package_id)
             included_edition = await session.get(SteamEdition, package_id)
             if included_edition is None:
@@ -572,7 +623,11 @@ async def _persist_details(
         bundle_id = _field(item, "bundle_id")
         price_region = _price_region(item)
         currency = _currency(item)
-        if bundle_id is None or not price_region:
+        if (
+            bundle_id is None
+            or int(bundle_id) not in authoritative_bundle_price_ids
+            or not price_region
+        ):
             continue
         values = {
             "currency": currency or None,
@@ -592,6 +647,31 @@ async def _persist_details(
         else:
             for field_name, value in values.items():
                 setattr(price_row, field_name, value)
+
+    # A successful bundle response is also an authoritative observation of
+    # its included package topology.  If Steam supplied no standalone sale
+    # price for an included package in this observation region, retain the
+    # explicit unavailable observation instead of silently dropping it.  Do
+    # not overwrite a price discovered from a direct package offer.
+    bundle_regions: dict[int, set[str]] = {}
+    for item in _items(data.get("bundle_prices")):
+        bundle_id = _field(item, "bundle_id")
+        region = _price_region(item)
+        if bundle_id is not None and region:
+            bundle_regions.setdefault(int(bundle_id), set()).add(region)
+    for item in _items(data.get("bundles")):
+        bundle_id = _field(item, "bundle_id")
+        if bundle_id is None or int(bundle_id) not in authoritative_bundle_ids:
+            continue
+        for package_id in _field(item, "edition_package_ids", []) or []:
+            for region in bundle_regions.get(int(bundle_id), set()):
+                if await session.get(SteamEditionPrice, (int(package_id), region)) is None:
+                    session.add(
+                        SteamEditionPrice(
+                            package_id=int(package_id),
+                            price_region=region,
+                        )
+                    )
 
     orphan_packages = select(SteamEdition.package_id).where(
         ~SteamEdition.package_id.in_(select(SteamAppEdition.package_id)),
@@ -979,7 +1059,6 @@ async def _persist_branches(
     data: object,
 ) -> None:
     await session.execute(delete(SteamBuildBranch).where(SteamBuildBranch.app_id == app_id))
-    await session.execute(delete(SteamAppDepot).where(SteamAppDepot.app_id == app_id))
     values = data.get("branches") if isinstance(data, dict) else data
     for item in _items(values):
         if not isinstance(item, BuildBranch) and not isinstance(item, dict):
@@ -1004,6 +1083,34 @@ async def _persist_branches(
         )
     if not isinstance(data, dict):
         return
+
+    # The branches scope owns the app -> depot set.  Replace it only after an
+    # authoritative loader has returned the depot payload; a loader failure
+    # never reaches this function.
+    current_depot_ids = {
+        int(depot_id)
+        for item in _items(data.get("depots"))
+        if (depot_id := _field(item, "depot_id")) is not None
+    }
+    unresolved_shared_ids = {
+        int(depot_id)
+        for depot_id in _items(data.get("unresolved_shared_depot_ids"))
+        if depot_id is not None
+    }
+    await session.execute(delete(SteamAppDepot).where(SteamAppDepot.app_id == app_id))
+    if current_depot_ids:
+        await session.execute(
+            delete(SteamDepotOs).where(SteamDepotOs.depot_id.in_(current_depot_ids))
+        )
+        # A missing shared source is explicitly non-authoritative.  Preserve
+        # its old manifests until the source app becomes available again.
+        manifest_refresh_ids = current_depot_ids - unresolved_shared_ids
+        if manifest_refresh_ids:
+            await session.execute(
+                delete(SteamDepotManifest).where(
+                    SteamDepotManifest.depot_id.in_(manifest_refresh_ids)
+                )
+            )
     for item in _items(data.get("depots")):
         depot_id = _field(item, "depot_id")
         if depot_id is None:
@@ -1023,9 +1130,7 @@ async def _persist_branches(
             "shared_install",
             "system_defined",
         ):
-            value = _field(item, field_name)
-            if value is not None:
-                setattr(row, field_name, value)
+            setattr(row, field_name, _field(item, field_name))
         if await session.get(SteamAppDepot, (app_id, int(depot_id))) is None:
             session.add(SteamAppDepot(app_id=app_id, depot_id=int(depot_id)))
     for raw in _items(data.get("depot_os")):
@@ -1051,6 +1156,7 @@ async def _persist_branches(
         manifest.manifest_id = _text(_field(item, "manifest_id"))
         manifest.download_size = _field(item, "download_size")
         manifest.disk_size = _field(item, "disk_size")
+    await _gc_orphan_depots(session)
 
 
 __all__ = ["persist_steam_scope", "remove_all_steam_data", "remove_steam_scope"]

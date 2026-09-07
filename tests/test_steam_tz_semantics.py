@@ -370,7 +370,20 @@ def test_storebrowse_identity_tags_and_depot_source_keys_are_not_legacy_indexes(
     )
     depot = depots["depots"][0]
     assert (depot.language, depot.optional_dlc_app_id, depot.system_defined) == ("pt-BR", 99, True)
-    assert depots["manifests"][0].download_size == 0
+    assert depots["manifests"][0].download_size is None
+    assert depots["manifests"][0].disk_size is None
+    language_cases = parse_depots(
+        {
+            "depots": {
+                "11": {"config": {"language": "  "}},
+                "12": {"config": {"language": "not-a-steam-language"}},
+            }
+        }
+    )
+    assert [item.language for item in language_cases["depots"]] == [None, None]
+    assert [item["code"] for item in language_cases["diagnostics"]] == [
+        "unknown_steam_depot_language"
+    ]
 
 
 def test_branch_profiles_combine_common_os_language_and_shared_depots() -> None:

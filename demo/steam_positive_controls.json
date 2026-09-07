@@ -214,7 +214,7 @@
     {
       "name": "unknown_depot_download_not_zero",
       "kind": "depot",
-      "raw": {"depots": {"123": {"depotfromapp": 999, "manifests": {"alpha4": {"size": 1000}}}, "branches": {"alpha4": {"buildid": "1"}}}},
+      "raw": {"depots": {"123": {"depotfromapp": 999, "manifests": {"alpha4": {"download": 0, "size": 1000}}}, "branches": {"alpha4": {"buildid": "1"}}}},
       "expected": {"branch": "alpha4", "download_size_min": null}
     },
     {
