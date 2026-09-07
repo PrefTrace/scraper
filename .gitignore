@@ -155,6 +155,7 @@ demo/*
 !demo/benchmark_wikidata.py
 !demo/benchmark_pipeline.py
 !demo/benchmark_steam.py
+!demo/steam_positive_controls.json
 !demo/wikidata_benchmark.json
 !demo/wikidata_samples.md
 !demo/wikidata_tz_gap_report.md
@@ -230,9 +231,9 @@ __marimo__/
 
 # Large generated Steam metabase; keep benchmark SQLite artifacts separate.
 outputs/steam_metabase/*.sqlite
-# Fresh real-pipeline benchmark databases are local artifacts; keep the
-# canonical tracked snapshot at outputs/real_pipeline_10/pipeline.sqlite3.
-outputs/real_pipeline_10/pipeline_*.sqlite3
+# Fresh real-pipeline benchmark databases are local artifacts and must not
+# enter commits; the benchmark report points to the local SQLite artifact.
+outputs/real_pipeline_10/*.sqlite3
 # SQLite runtime sidecars are transient and must never enter a commit.
 **/*.sqlite3-shm
 **/*.sqlite3-wal

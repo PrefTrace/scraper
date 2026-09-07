@@ -17,6 +17,16 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit, urlunsplit
 
 from selectolax.parser import HTMLParser, Node
 
+try:
+    from simplemma import lemma as _simplemma_lemma
+except ImportError:  # pragma: no cover - dependency is declared in requirements.txt
+    _simplemma_lemma = None
+
+try:
+    import stopwordsiso as _stopwordsiso
+except ImportError:  # pragma: no cover - dependency is declared in requirements.txt
+    _stopwordsiso = None
+
 from scraper.models import (
     Achievement,
     AgeRating,
@@ -32,6 +42,8 @@ from scraper.models import (
     ExternalLink,
     ExternalReview,
     Feature,
+    Genre,
+    GenreLocalization,
     LanguageSupport,
     LocalizedGameInfo,
     MediaImage,
@@ -44,8 +56,10 @@ from scraper.models import (
     SteamDeckSupport,
     SystemRequirement,
     Tag,
+    TagLocalization,
     TextValue,
     ThirdPartyEula,
+    WorkshopStats,
 )
 
 from .locales import (
@@ -85,7 +99,7 @@ _DESCRIPTOR_NEGATIONS = {"no", "not", "without", "nicht", "ne", "нет", "бе�
 _MEDIA_KEY_TYPES = {
     "header_image": "header_capsule",
     "capsule_image": "main_capsule",
-    "capsule_imagev5": "main_capsule",
+    "capsule_imagev5": "small_capsule",
     "capsule_imagev6": "main_capsule",
     "small_capsule": "small_capsule",
     "vertical_capsule": "vertical_capsule",
@@ -138,7 +152,7 @@ def _canonical_media_type(value: Any) -> str | None:
         "header_image": "header_capsule",
         "capsule": "main_capsule",
         "capsule_image": "main_capsule",
-        "capsule_imagev5": "main_capsule",
+        "capsule_imagev5": "small_capsule",
         "capsule_imagev6": "main_capsule",
         "background": "page_background",
         "background_raw": "page_background",
@@ -146,6 +160,7 @@ def _canonical_media_type(value: Any) -> str | None:
         "video": "trailer",
     }.get(normalized, normalized)
     return normalized if normalized in _CANONICAL_MEDIA_TYPES else None
+
 
 _STEAM_TYPE_MAP = {
     "game": "game",
@@ -237,6 +252,65 @@ def _parse_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, (int, float)) and value > 0:
+        return datetime.fromtimestamp(value, tz=UTC).replace(tzinfo=None)
+    if isinstance(value, str) and value.strip():
+        raw = value.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+    return None
+
+
+def _discount_metadata(raw: dict[str, Any]) -> tuple[str | None, datetime | None]:
+    discounts = raw.get("active_discounts")
+    values = list(discounts.values()) if isinstance(discounts, dict) else _as_list(discounts)
+    if not values:
+        values = [raw]
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        description = item.get("description") or item.get("discount_description")
+        end_at = _parse_datetime(
+            item.get("end_at", item.get("timestamp_end", item.get("end_time")))
+        )
+        if isinstance(description, str) and description.strip() or end_at is not None:
+            return (
+                description.strip()
+                if isinstance(description, str) and description.strip()
+                else None,
+                end_at,
+            )
+    return None, None
+
+
+def _price_region(raw: dict[str, Any]) -> str | None:
+    for key in ("price_region", "price_region_code", "steam_price_region"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
+
+
+def _discount_from_prices(
+    initial: int | None, final: int | None, reported: int | None
+) -> tuple[int | None, str | None]:
+    if initial is None or final is None or reported is None or initial <= 0:
+        return reported, None
+    calculated = round((initial - final) * 100 / initial)
+    if abs(calculated - reported) > 1:
+        return reported, (
+            f"Price discount is inconsistent: initial={initial}, final={final}, "
+            f"reported={reported}, calculated={calculated}"
+        )
+    return reported, None
 
 
 def _parse_bool(value: Any) -> bool | None:
@@ -378,9 +452,7 @@ def _release_status(data: dict[str, Any], coming_soon: bool | None) -> str:
             return "not_released"
     if _parse_bool(data.get("is_early_access")) or _parse_bool(data.get("early_access")):
         return "early_access"
-    if _parse_bool(data.get("is_advanced_access")) or _parse_bool(
-        data.get("advanced_access")
-    ):
+    if _parse_bool(data.get("is_advanced_access")) or _parse_bool(data.get("advanced_access")):
         return "advanced_access"
     # A preorder is a purchase state, not the TZ release state.
     if _parse_bool(data.get("is_preorder")) or _parse_bool(data.get("preorder")):
@@ -551,6 +623,217 @@ def parse_tags(html: str) -> list[Tag]:
     return result
 
 
+def _structured_tag_values(data: dict[str, Any]) -> list[tuple[int, str | None, int | None]]:
+    candidates = [data.get("tags"), data.get("store_tags")]
+    app_info = data.get("app_info")
+    if isinstance(app_info, dict):
+        common = app_info.get("common")
+        if isinstance(common, dict):
+            candidates.extend((common.get("tags"), common.get("store_tags")))
+    result: list[tuple[int, str | None, int | None]] = []
+    for raw_values in candidates:
+        if isinstance(raw_values, dict):
+            values = [
+                {"tag_id": key, **value}
+                if isinstance(value, dict)
+                else {"tag_id": key, "name": value}
+                for key, value in raw_values.items()
+            ]
+        else:
+            values = _as_list(raw_values)
+        for raw in values:
+            if not isinstance(raw, dict):
+                continue
+            tag_id = _parse_int(raw.get("tag_id", raw.get("tagid", raw.get("id"))))
+            if tag_id is None:
+                continue
+            name = raw.get("name", raw.get("tag"))
+            weight = _parse_int(raw.get("weight", raw.get("count")))
+            result.append(
+                (
+                    tag_id,
+                    str(name).strip() if isinstance(name, str) and name.strip() else None,
+                    weight,
+                )
+            )
+    return list(dict.fromkeys(result))
+
+
+def parse_structured_tags(
+    data: dict[str, Any] | None, *, language: str = "en"
+) -> tuple[list[Tag], list[TagLocalization]]:
+    if not isinstance(data, dict):
+        return [], []
+    rows = _structured_tag_values(data)
+    tags = [Tag(tag_id=tag_id, weight=weight) for tag_id, _name, weight in rows]
+    localizations = [
+        TagLocalization(tag_id=tag_id, language=language, name=name)
+        for tag_id, name, _weight in rows
+        if name
+    ]
+    return tags, localizations
+
+
+def parse_html_structured_tags(
+    html: str | None, *, language: str = "en"
+) -> tuple[list[Tag], list[TagLocalization]]:
+    if not html:
+        return [], []
+    names_match = re.search(r'"tags"\s*:\s*(\[[^\]]*\])', html)
+    ids_match = re.search(r'"tagids"\s*:\s*(\[[^\]]*\])', html)
+    if not names_match or not ids_match:
+        return [], []
+    try:
+        import json
+
+        names = json.loads(names_match.group(1))
+        ids = json.loads(ids_match.group(1))
+    except (ValueError, TypeError):
+        return [], []
+    if not isinstance(names, list) or not isinstance(ids, list):
+        return [], []
+    rows = [
+        {"tag_id": tag_id, "name": name}
+        for tag_id, name in zip(ids, names, strict=False)
+        if _parse_int(tag_id) is not None and isinstance(name, str) and name.strip()
+    ]
+    return parse_structured_tags({"tags": rows}, language=language)
+
+
+def parse_html_creator_entities(html: str | None) -> list[dict[str, int]]:
+    if not html:
+        return []
+    match = re.search(r'"creator_clan_ids"\s*:\s*(\[[^\]]*\])', html)
+    if not match:
+        return []
+    try:
+        import json
+
+        values = json.loads(match.group(1))
+    except (ValueError, TypeError):
+        return []
+    return [
+        {"creator_clan_account_id": int(value)} for value in values if _parse_int(value) is not None
+    ]
+
+
+def parse_structured_genres(
+    data: dict[str, Any] | None, *, language: str = "en"
+) -> tuple[list[Genre], list[GenreLocalization]]:
+    if not isinstance(data, dict):
+        return [], []
+    result: list[tuple[int, str | None]] = []
+    for raw in _as_list(data.get("genres")):
+        if isinstance(raw, dict):
+            genre_id = _parse_int(raw.get("genre_id", raw.get("id")))
+            name = raw.get("name", raw.get("description"))
+        else:
+            genre_id = None
+            name = raw
+        if genre_id is None:
+            continue
+        result.append(
+            (genre_id, str(name).strip() if isinstance(name, str) and name.strip() else None)
+        )
+    return (
+        [Genre(genre_id=genre_id) for genre_id, _name in result],
+        [
+            GenreLocalization(genre_id=genre_id, language=language, name=name)
+            for genre_id, name in result
+            if name
+        ],
+    )
+
+
+def parse_country_restrictions(data: dict[str, Any] | None) -> list[Any]:
+    """Normalize package country restrictions without deriving countries from store scope."""
+
+    if not isinstance(data, dict):
+        return []
+    result: list[Any] = []
+    from scraper.models import PackageCountryRestriction
+
+    for package_id, group, item in _package_entries(data):
+        raw = item.get("country_restrictions", item.get("country_restriction"))
+        if raw is None:
+            raw = group.get("country_restrictions", group.get("country_restriction"))
+        if isinstance(raw, dict):
+            values = [{"country_code": key, "type": value} for key, value in raw.items()]
+        else:
+            values = _as_list(raw)
+        for value in values:
+            if isinstance(value, str):
+                result.append(
+                    PackageCountryRestriction(
+                        package_id=package_id,
+                        restriction_type="unknown",
+                        country_code=value.upper(),
+                    )
+                )
+                continue
+            if not isinstance(value, dict):
+                continue
+            country = value.get("country_code", value.get("country"))
+            restriction_type = value.get("restriction_type", value.get("type", "unknown"))
+            if isinstance(country, str) and country.strip():
+                result.append(
+                    PackageCountryRestriction(
+                        package_id=package_id,
+                        restriction_type=str(restriction_type),
+                        country_code=country.strip().upper(),
+                    )
+                )
+    unique: list[PackageCountryRestriction] = []
+    seen: set[tuple[int, str, str]] = set()
+    for item in result:
+        key = (item.package_id, item.restriction_type, item.country_code)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def parse_workshop_stats(
+    data: dict[str, Any] | None,
+    html: str | None = None,
+    *,
+    collection_html: str | None = None,
+    app_id: int = 0,
+) -> WorkshopStats:
+    common = (
+        data.get("common")
+        if isinstance(data, dict) and isinstance(data.get("common"), dict)
+        else data or {}
+    )
+    categories = (
+        parse_appinfo_category_ids(common.get("category")) if isinstance(common, dict) else []
+    )
+    category_ids = {item.id for item in categories}
+    available = 30 in category_ids if category_ids else None
+    published = collections = None
+    for source_html, field_name in ((html, "published"), (collection_html, "collections")):
+        if not source_html:
+            continue
+        match = re.search(
+            r'\\?"workshopNumbers\\?"\s*:\s*\{[^}]*\\?"total\\?"\s*:\s*(\d+)',
+            source_html,
+        )
+        if match:
+            if field_name == "published":
+                published = int(match.group(1))
+            else:
+                collections = int(match.group(1))
+    if published is not None:
+        available = True
+    return WorkshopStats(
+        app_id=app_id,
+        workshop_available=available,
+        published_file_count=published,
+        collection_count=collections,
+    )
+
+
 def _achievement_from_data(
     raw: dict[str, Any], *, language: str | None = None
 ) -> Achievement | None:
@@ -685,9 +968,7 @@ def parse_media(
                 full_url=full_url,
                 url=full_url,
                 format=_format_from_url(full_url),
-                language=_language(raw_language)[0]
-                if isinstance(raw_language, str)
-                else None,
+                language=_language(raw_language)[0] if isinstance(raw_language, str) else None,
             )
         )
 
@@ -887,12 +1168,16 @@ def _edition_name(group: dict[str, Any], item: dict[str, Any]) -> str | None:
             name = re.sub(r"^(?:buy|purchase)\s+", "", name, flags=re.IGNORECASE).strip()
             # Store HTML sometimes appends the display price to the option
             # label.  Price belongs to the price row, never to package name.
-            return re.sub(
-                r"\s+(?:[$€£]\s*[\d,.]+|[\d,.]+\s*(?:USD|EUR|GBP|RUB))$",
-                "",
-                name,
-                flags=re.IGNORECASE,
-            ).rstrip(" -–—:").strip()
+            return (
+                re.sub(
+                    r"\s+(?:[$€£]\s*[\d,.]+|[\d,.]+\s*(?:USD|EUR|GBP|RUB))$",
+                    "",
+                    name,
+                    flags=re.IGNORECASE,
+                )
+                .rstrip(" -–—:")
+                .strip()
+            )
     return None
 
 
@@ -932,6 +1217,7 @@ def parse_editions(
         prices.append(
             EditionPrice(
                 package_id=package_id,
+                price_region=_price_region(item) or _price_region(group),
                 initial=initial,
                 final=final,
                 discount_percent=_parse_int(
@@ -939,20 +1225,18 @@ def parse_editions(
                 ),
                 price_type="recurring"
                 if _parse_bool(
-                    item.get(
-                        "is_recurring_subscription", group.get("is_recurring_subscription")
-                    )
+                    item.get("is_recurring_subscription", group.get("is_recurring_subscription"))
                 )
                 else "one_time",
-                period=(
-                    str(recurring["period"]) if recurring.get("period") is not None else None
-                ),
+                period=(str(recurring["period"]) if recurring.get("period") is not None else None),
                 period_units=_parse_int(recurring.get("frequency", recurring.get("period_units"))),
                 currency=(
                     str(item.get("currency") or group.get("currency") or currency).upper()
                     if item.get("currency") or group.get("currency") or currency
                     else None
                 ),
+                discount_description=_discount_metadata(item)[0],
+                discount_end_at=_discount_metadata(item)[1],
             )
         )
     return package_ids, editions, prices
@@ -1010,6 +1294,7 @@ def parse_bundles(
         prices.append(
             BundlePrice(
                 bundle_id=bundle_id,
+                price_region=_price_region(raw),
                 effective_discount_percent=_parse_int(
                     raw.get("discount_pct", raw.get("discount_percent"))
                 ),
@@ -1020,6 +1305,8 @@ def parse_bundles(
                     if raw.get("currency") or currency
                     else None
                 ),
+                discount_description=_discount_metadata(raw)[0],
+                discount_end_at=_discount_metadata(raw)[1],
             )
         )
     return bundles, prices
@@ -1131,9 +1418,7 @@ def parse_external_links(data: dict[str, Any], html: str | None = None) -> list[
                 continue
             result.append(ExternalLink(type=_social_link_type(href, label), url=href))
     normalized_links = [
-        normalized
-        for link in result
-        if (normalized := _normalize_external_link(link)) is not None
+        normalized for link in result if (normalized := _normalize_external_link(link)) is not None
     ]
     unique: list[ExternalLink] = []
     seen: set[tuple[str, str | None, str | None]] = set()
@@ -1154,12 +1439,38 @@ def parse_age_ratings(data: dict[str, Any] | None) -> list[AgeRating]:
             continue
         raw_descriptors = str(raw.get("descriptors", ""))
         descriptors = normalize_descriptor_text(raw_descriptors)
+        authority_name = str(authority).upper()
+        rating_value = str(raw["rating"]) if raw.get("rating") is not None else None
+        minimum_age = _parse_int(raw.get("required_age"))
+        if minimum_age is None and rating_value:
+            normalized_rating = rating_value.strip().upper().replace("+", "")
+            rating_map = {
+                "EC": 3,
+                "E": 6,
+                "E10": 10,
+                "T": 13,
+                "M": 17,
+                "AO": 18,
+                "USK 0": 0,
+                "USK 6": 6,
+                "USK 12": 12,
+                "USK 16": 16,
+                "USK 18": 18,
+            }
+            if authority_name == "PEGI":
+                minimum_age = (
+                    _parse_int(re.search(r"\d+", normalized_rating).group())
+                    if re.search(r"\d+", normalized_rating)
+                    else None
+                )
+            else:
+                minimum_age = rating_map.get(normalized_rating)
         result.append(
             AgeRating(
                 authority=str(authority),
                 age_id=str(authority),
-                rating=str(raw["rating"]) if raw.get("rating") is not None else None,
-                required_age=_parse_int(raw.get("required_age")),
+                rating=rating_value,
+                minimum_age=minimum_age,
                 descriptors=descriptors,
                 banned=_parse_bool(raw.get("banned")),
                 use_age_gate=_parse_bool(raw.get("use_age_gate")),
@@ -1170,13 +1481,15 @@ def parse_age_ratings(data: dict[str, Any] | None) -> list[AgeRating]:
     return result
 
 
-def normalize_descriptor_text(value: str | None, *, title: str | None = None) -> list[str]:
+def normalize_descriptor_text(
+    value: str | None, *, title: str | None = None, language: str | None = None
+) -> list[str]:
     """Create deterministic descriptor fragments while retaining raw source separately."""
 
     if not isinstance(value, str):
         return []
     text = plain_text(unicodedata.normalize("NFKC", value)).strip()
-    if not text or _DESCRIPTOR_METADATA.search(text):
+    if not text:
         return []
     if title:
         subject = re.escape(plain_text(title).strip())
@@ -1186,20 +1499,33 @@ def normalize_descriptor_text(value: str | None, *, title: str | None = None) ->
             text,
             flags=re.IGNORECASE,
         )
-    fragments = re.split(r"\s*(?:;|,|\.|/|\\|\||\band\b|\bor\b)\s*", text, flags=re.I)
+    fragments = re.split(r"\s*(?:\r?\n|;|,|\.|/|\\|\||\band\b|\bor\b)\s*", text, flags=re.I)
     result: list[str] = []
     for fragment in fragments:
         normalized = re.sub(r"\s+", " ", fragment).strip()
-        if not normalized or re.fullmatch(r"[\W\d_]+", normalized):
+        if (
+            not normalized
+            or _DESCRIPTOR_METADATA.search(normalized)
+            or re.fullmatch(r"[\W\d_]+", normalized)
+        ):
             continue
         tokens = normalized.casefold().split()
+        stopwords = set(_DESCRIPTOR_STOPWORDS)
+        if _stopwordsiso is not None:
+            for stopword_language in (language, "en", "ru", "de", "fr", "es", "it", "pl"):
+                if stopword_language:
+                    try:
+                        stopwords.update(_stopwordsiso.stopwords(stopword_language.split("-")[0]))
+                    except (KeyError, TypeError):
+                        pass
         meaningful = [
-            token
-            for token in tokens
-            if token not in _DESCRIPTOR_STOPWORDS or token in _DESCRIPTOR_NEGATIONS
+            token for token in tokens if token not in stopwords or token in _DESCRIPTOR_NEGATIONS
         ]
         if not meaningful:
             continue
+        if _simplemma_lemma is not None:
+            lemma_language = (language or "en").split("-")[0]
+            meaningful = [_simplemma_lemma(token, lemma_language) or token for token in meaningful]
         cleaned = " ".join(meaningful)
         if cleaned not in result:
             result.append(cleaned)
@@ -1224,8 +1550,7 @@ def parse_descriptors(
         notes = data.get("notes")
         if isinstance(notes, str) and notes.strip():
             result.extend(
-                Descriptor(age_id="steam", name=name)
-                for name in normalize_descriptor_text(notes)
+                Descriptor(age_id="steam", name=name) for name in normalize_descriptor_text(notes)
             )
         if _parse_bool(data.get("display_online_notice")):
             result.append(
@@ -1358,7 +1683,9 @@ def parse_eulas(data: dict[str, Any] | None, html: str | None = None) -> list[Th
                     name_description=(
                         str(raw["name_description"])
                         if raw.get("name_description") is not None
-                        else str(raw["name"]) if raw.get("name") is not None else None
+                        else str(raw["name"])
+                        if raw.get("name") is not None
+                        else None
                     ),
                     url=_optional_url(raw.get("url")),
                     version=raw.get("version"),
@@ -1393,9 +1720,6 @@ def parse_controllers(data: dict[str, Any] | None, html: str | None = None) -> l
                 result.append(
                     Controller(
                         name=raw["name"],
-                        support=_parse_bool(raw.get("support", raw.get("supported")))
-                        if "support" in raw or "supported" in raw
-                        else True,
                         bluetooth=_parse_bool(raw.get("bluetooth", raw.get("bt"))),
                         usb=_parse_bool(raw.get("usb")),
                     )
@@ -1484,9 +1808,7 @@ def parse_appinfo_controller_configs(config: dict[str, Any] | None) -> list[Cont
         )
         current = result.get(name)
         if current is None:
-            result[name] = Controller(name=name, support=True)
-        else:
-            current.support = True
+            result[name] = Controller(name=name)
     return list(result.values())
 
 
@@ -1499,21 +1821,15 @@ def parse_appinfo_semantics(
     """Extract structured category/controller/deck semantics from AppInfo."""
 
     categories = parse_appinfo_category_ids(common.get("category"), registry=registry)
-    category_ids = [
-        item.id
-        for item in categories
-        if item.id is not None
-    ]
-    controller_support = _controller_support_level(common.get("controller_support"))
+    category_ids = [item.id for item in categories if item.id is not None]
+    controller_support = _controller_support_level(common.get("controller_support")) or "none"
     deck = common.get("steam_deck_compatibility")
     if not isinstance(deck, dict):
         deck = {"category": deck}
     category = _parse_int(deck.get("category"))
     # Category 60 means Steam Input/gamepad preferred; category 8 is VAC.
     deck_status = (
-        {0: "unknown", 1: "unsupported", 2: "playable", 3: "supported"}.get(
-            category, "unknown"
-        )
+        {0: "unknown", 1: "unsupported", 2: "playable", 3: "supported"}.get(category, "unknown")
         if category is not None
         else "unknown"
     )
@@ -1545,13 +1861,11 @@ def parse_appinfo_semantics(
         "categories": categories,
         "accessibility_features": accessibility_features,
         "vac_enabled": True if 8 in category_ids else None,
-        "gamepad_preferred": True if 60 in category_ids else None,
+        "gamepad_preferred": 60 in category_ids,
         "controller_support": controller_support,
         "controllers": controller_rows,
         "unknown_category_ids": unknown_category_ids,
-        "deck_support": SteamDeckSupport(
-            status=deck_status
-        ),
+        "deck_support": SteamDeckSupport(status=deck_status),
     }
 
 
@@ -1569,9 +1883,8 @@ def parse_appinfo_controllers(category_ids: list[int]) -> list[Controller]:
             name, bluetooth, usb = mapped
             current = merged.get(name)
             if current is None:
-                merged[name] = Controller(name=name, support=True, bluetooth=bluetooth, usb=usb)
+                merged[name] = Controller(name=name, bluetooth=bluetooth, usb=usb)
             else:
-                current.support = True
                 current.bluetooth = current.bluetooth or bluetooth
                 current.usb = current.usb or usb
     return list(merged.values())
@@ -1588,79 +1901,129 @@ def parse_organizations(data: dict[str, Any] | None) -> list[OrganizationCredit]
             else:
                 name = raw
             if isinstance(name, str) and name.strip():
+                creator_id = (
+                    _parse_int(raw.get("creator_clan_account_id", raw.get("clan_account_id")))
+                    if isinstance(raw, dict)
+                    else None
+                )
                 result.append(
-                    OrganizationCredit(name=name.strip(), status=status)
+                    OrganizationCredit(
+                        credited_name=name.strip(),
+                        status=status,
+                        creator_clan_account_id=creator_id,
+                    )
                 )
     return result
 
 
-def _branch_size_profiles(
-    data: dict[str, Any], branch_name: str
-) -> tuple[list[int], list[int]]:
-    depots = data.get("depots")
-    if not isinstance(depots, dict):
-        return [], []
-    depot_rows = [value for key, value in depots.items() if str(key).isdigit()]
-    os_values = {"windows"}
-    languages = {"english"}
-    for raw in depot_rows:
-        if not isinstance(raw, dict):
+def parse_depots(data: dict[str, Any] | None) -> dict[str, list[Any]]:
+    """Normalize AppInfo depots into depot, OS, and branch-manifest rows."""
+
+    if not isinstance(data, dict) or not isinstance(data.get("depots"), dict):
+        return {"depots": [], "depot_os": [], "manifests": [], "app_depots": []}
+    from scraper.models import Depot, DepotManifest
+
+    raw_depots = data["depots"]
+    depots: list[Depot] = []
+    depot_os: list[tuple[int, str]] = []
+    manifests: list[DepotManifest] = []
+    app_depots: list[int] = []
+    for raw_id, raw in raw_depots.items():
+        depot_id = _parse_int(raw_id)
+        if depot_id is None or not isinstance(raw, dict):
             continue
-        config_value = raw.get("config")
-        config: dict[str, Any] = config_value if isinstance(config_value, dict) else {}
-        raw_os = config.get("oslist")
-        if isinstance(raw_os, str):
-            os_values.update(
-                item.strip().casefold().replace("macos", "mac")
-                for item in raw_os.split(",")
+        config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
+        dlc_app_id = _parse_int(raw.get("dlcappid", raw.get("dlc_app_id")))
+        optional_dlc_app_id = _parse_int(raw.get("optional_dlc_app_id"))
+        depot_from_app = _parse_int(raw.get("depotfromapp", raw.get("depot_from_app")))
+        depots.append(
+            Depot(
+                depot_id=depot_id,
+                name=str(raw["name"]) if raw.get("name") is not None else None,
+                language=(
+                    str(config["language"]).strip()
+                    if config.get("language") is not None and str(config["language"]).strip()
+                    else None
+                ),
+                architecture=str(config.get("osarch"))
+                if config.get("osarch") is not None
+                else None,
+                low_violence=_parse_bool(config.get("lowviolence", raw.get("lowviolence"))),
+                dlc_app_id=dlc_app_id,
+                optional_dlc_app_id=optional_dlc_app_id,
+                depot_from_app=depot_from_app,
+                shared_install=_parse_bool(config.get("sharedinstall", raw.get("sharedinstall"))),
+                system_defined=_parse_bool(config.get("system_defined", raw.get("system_defined"))),
             )
-        raw_language = config.get("language")
-        if isinstance(raw_language, str) and raw_language.strip():
-            languages.add(raw_language.strip().casefold())
-    sizes: list[tuple[int, int]] = []
-    for operating_system in sorted(os_values):
-        for architecture in ("32", "64"):
-            for language in sorted(languages):
-                download_total = 0
-                disk_total = 0
-                included = False
-                for raw in depot_rows:
-                    if (
-                        not isinstance(raw, dict)
-                        or raw.get("dlcappid") is not None
-                        or raw.get("depotfromapp") is not None
-                    ):
-                        continue
-                    config_value = raw.get("config")
-                    config = config_value if isinstance(config_value, dict) else {}
-                    raw_os = config.get("oslist")
-                    if isinstance(raw_os, str):
-                        supported_os = {
-                            item.strip().casefold().replace("macos", "mac")
-                            for item in raw_os.split(",")
-                        }
-                        if operating_system not in supported_os:
-                            continue
-                    raw_arch = str(config.get("osarch", ""))
-                    if raw_arch and raw_arch != architecture:
-                        continue
-                    raw_language = config.get("language")
-                    if isinstance(raw_language, str) and raw_language.casefold() != language:
-                        continue
-                    manifests = raw.get("manifests")
-                    manifest = manifests.get(branch_name) if isinstance(manifests, dict) else None
-                    if not isinstance(manifest, dict):
-                        continue
-                    download = _parse_int(manifest.get("download"))
-                    disk = _parse_int(manifest.get("size", manifest.get("disk")))
-                    if download is None and disk is None:
-                        continue
-                    included = True
-                    download_total += download or 0
-                    disk_total += disk or 0
-                if included:
-                    sizes.append((download_total, disk_total))
-    return [item[0] for item in sizes], [item[1] for item in sizes]
+        )
+        app_depots.append(depot_id)
+        raw_os = config.get("oslist")
+        os_values = raw_os.split(",") if isinstance(raw_os, str) else _as_list(raw_os)
+        for value in os_values:
+            if isinstance(value, str) and value.strip():
+                depot_os.append((depot_id, value.strip().casefold().replace("macos", "mac")))
+        raw_manifests = raw.get("manifests")
+        if isinstance(raw_manifests, dict):
+            for branch, manifest in raw_manifests.items():
+                if not isinstance(branch, str) or not isinstance(manifest, dict):
+                    continue
+                manifests.append(
+                    DepotManifest(
+                        depot_id=depot_id,
+                        branch=branch,
+                        manifest_id=str(manifest.get("gid", manifest.get("manifestid")))
+                        if manifest.get("gid", manifest.get("manifestid")) is not None
+                        else None,
+                        download_size=_install_size(manifest.get("download")),
+                        disk_size=_install_size(manifest.get("size", manifest.get("disk"))),
+                    )
+                )
+    return {
+        "depots": depots,
+        "depot_os": depot_os,
+        "manifests": manifests,
+        "app_depots": app_depots,
+    }
+
+
+def _install_size(value: Any) -> int | None:
+    """Normalize Steam's zero download/disk sentinel to unknown."""
+
+    parsed = _parse_int(value)
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _branch_size_profiles(data: dict[str, Any], branch_name: str) -> tuple[list[int], list[int]]:
+    rows = parse_depots(data)
+    raw_depots = data.get("depots") if isinstance(data.get("depots"), dict) else {}
+    grouped: dict[tuple[str, str, str], list[tuple[int | None, int | None]]] = {}
+    for manifest in rows["manifests"]:
+        if manifest.branch != branch_name:
+            continue
+        raw = raw_depots.get(str(manifest.depot_id), {}) if isinstance(raw_depots, dict) else {}
+        if not isinstance(raw, dict) or raw.get("dlcappid") is not None:
+            continue
+        config = raw.get("config") if isinstance(raw.get("config"), dict) else {}
+        raw_os = config.get("oslist")
+        os_name = (
+            str(raw_os).split(",")[0].strip().casefold().replace("macos", "mac")
+            if isinstance(raw_os, str) and raw_os.strip()
+            else "unknown"
+        )
+        architecture = str(config.get("osarch") or "unknown").casefold()
+        language = str(config.get("language") or "unknown").casefold()
+        grouped.setdefault((os_name, architecture, language), []).append(
+            (manifest.download_size, manifest.disk_size)
+        )
+    downloads: list[int] = []
+    disks: list[int] = []
+    for values in grouped.values():
+        known_disk = [value for _download, value in values if value is not None]
+        if known_disk:
+            disks.append(sum(known_disk))
+        if len(values) == len([value for value, _disk in values if value is not None]):
+            downloads.append(sum(value for value, _disk in values if value is not None))
+    return downloads, disks
 
 
 def _size_stats(values: list[int]) -> tuple[int | None, int | None, int | None]:
@@ -1695,8 +2058,8 @@ def parse_build_branches(data: dict[str, Any] | None) -> list[BuildBranch]:
         )
         download_sizes, disk_sizes = _branch_size_profiles(data, branch_name)
         if not download_sizes and raw.get("download_size") is not None:
-            direct_download = _parse_int(raw.get("download_size"))
-            direct_disk = _parse_int(raw.get("disk_size"))
+            direct_download = _install_size(raw.get("download_size"))
+            direct_disk = _install_size(raw.get("disk_size"))
             if direct_download is not None:
                 download_sizes = [direct_download]
             if direct_disk is not None:
@@ -1831,6 +2194,7 @@ def parse_store_browse_item(
     payload: dict[str, Any] | None,
     *,
     currency: str | None = None,
+    price_region: str | None = None,
     bundle_memberships: dict[int, list[int]] | None = None,
 ) -> dict[str, Any]:
     """Normalize the public IStoreBrowseService purchase response."""
@@ -1849,6 +2213,7 @@ def parse_store_browse_item(
     edition_prices: list[EditionPrice] = []
     bundles: list[Bundle] = []
     bundle_prices: list[BundlePrice] = []
+    price_diagnostics: list[dict[str, str]] = []
     for raw in purchase_options:
         if not isinstance(raw, dict):
             continue
@@ -1861,11 +2226,34 @@ def parse_store_browse_item(
         )
         final = _parse_int(raw.get("final_price_in_cents"))
         initial = _parse_int(
-            raw.get("initial_price_in_cents", raw.get("price_before_bundle_discount"))
+            raw.get("original_price_in_cents", raw.get("price_before_bundle_discount"))
         )
-        if initial is None and final is not None and not raw.get("bundle_discount_pct"):
+        reported_package_discount = _parse_int(raw.get("discount_pct"))
+        if initial is None and final is not None and not reported_package_discount:
             initial = final
-        discount = _parse_int(raw.get("bundle_discount_pct"))
+        package_discount, package_diagnostic = _discount_from_prices(
+            initial, final, reported_package_discount
+        )
+        if package_diagnostic:
+            price_diagnostics.append(
+                {"code": "price_discount_inconsistent", "message": package_diagnostic}
+            )
+        static_bundle_discount = _parse_int(
+            raw.get(
+                "static_discount_pct",
+                raw.get("configured_discount_pct", raw.get("bundle_discount_pct")),
+            )
+        )
+        reported_bundle_discount = _parse_int(
+            raw.get(
+                "effective_discount_pct",
+                raw.get("discount_pct", raw.get("bundle_discount_pct")),
+            )
+        )
+        effective_bundle_discount = reported_bundle_discount
+        if initial is not None and final is not None and initial > 0:
+            effective_bundle_discount = round((initial - final) * 100 / initial)
+        bundle_description, bundle_end_at = _discount_metadata(raw)
         if package_id is not None:
             option_currency = raw.get("currency") or normalized_currency
             editions.append(
@@ -1880,12 +2268,20 @@ def parse_store_browse_item(
             edition_prices.append(
                 EditionPrice(
                     package_id=package_id,
+                    price_region=_price_region(raw)
+                    or (
+                        price_region.strip().upper()
+                        if isinstance(price_region, str) and price_region.strip()
+                        else None
+                    ),
                     initial=initial,
                     final=final,
-                    discount_percent=_parse_int(raw.get("discount_pct")),
+                    discount_percent=package_discount,
                     price_type="recurring" if is_subscription else "one_time",
                     period="month" if is_subscription else None,
                     period_units=period_units,
+                    discount_description=_discount_metadata(raw)[0],
+                    discount_end_at=_discount_metadata(raw)[1],
                     currency=str(option_currency).upper() if option_currency else None,
                 )
             )
@@ -1896,7 +2292,7 @@ def parse_store_browse_item(
                 Bundle(
                     bundle_id=bundle_id,
                     name=name,
-                    discount_percent=discount,
+                    discount_percent=static_bundle_discount,
                     must_purchase_as_set=_parse_bool(raw.get("must_purchase_as_set")),
                     edition_package_ids=list(dict.fromkeys(included_ids)),
                 )
@@ -1904,9 +2300,17 @@ def parse_store_browse_item(
             bundle_prices.append(
                 BundlePrice(
                     bundle_id=bundle_id,
-                    effective_discount_percent=discount,
+                    price_region=_price_region(raw)
+                    or (
+                        price_region.strip().upper()
+                        if isinstance(price_region, str) and price_region.strip()
+                        else None
+                    ),
+                    effective_discount_percent=effective_bundle_discount,
                     initial=initial,
                     final=final,
+                    discount_description=bundle_description,
+                    discount_end_at=bundle_end_at,
                     currency=str(option_currency).upper() if option_currency else None,
                 )
             )
@@ -1918,6 +2322,7 @@ def parse_store_browse_item(
         "media": parse_media(item),
         "supported_languages": parse_store_browse_languages(item.get("supported_languages")),
         "external_links": parse_external_links({"links": item.get("links")}),
+        "price_diagnostics": price_diagnostics,
     }
 
 
@@ -1994,7 +2399,7 @@ def merge_app_info(
     ):
         if value not in (None, ""):
             merged[key] = value
-    if isinstance(common.get("category"), (list, dict)):
+    if isinstance(common, dict):
         semantics = parse_appinfo_semantics(
             common,
             registry=category_registry,
@@ -2021,7 +2426,7 @@ def merge_app_info(
         merged["controllers"] = semantics["controllers"]
         merged["vac_enabled"] = semantics["vac_enabled"]
         merged["gamepad_preferred"] = semantics["gamepad_preferred"]
-        merged["controller_support"] = common.get("controller_support")
+        merged["controller_support"] = semantics["controller_support"]
         merged["steam_deck"] = semantics["deck_support"]
         merged["deck_support"] = semantics["deck_support"]
     for source_key, target_key in (("developer", "developers"), ("publisher", "publishers")):
@@ -2063,10 +2468,16 @@ def parse_app_details(
     )
     raw_package_prices = parse_editions(data, currency=currency)[2]
     raw_bundle_prices = parse_bundles(data, currency=currency)[1]
+    if isinstance(store_country, str) and store_country.strip():
+        fallback_region = store_country.strip().upper()
+        for price in (*raw_package_prices, *raw_bundle_prices):
+            if price.price_region is None:
+                price.price_region = fallback_region
     if store_browse:
         browse = parse_store_browse_item(
             store_browse,
             currency=currency,
+            price_region=store_country,
             bundle_memberships=store_browse.get("_bundle_memberships")
             if isinstance(store_browse, dict)
             else None,
@@ -2101,6 +2512,11 @@ def parse_app_details(
         for price in bundle_prices:
             if price.currency is None:
                 price.currency = raw_currency_by_bundle.get(price.bundle_id)
+    if isinstance(store_country, str) and store_country.strip():
+        fallback_region = store_country.strip().upper()
+        for price in (*edition_prices, *bundle_prices):
+            if price.price_region is None:
+                price.price_region = fallback_region
     ratings = data.get("ratings") if isinstance(data.get("ratings"), dict) else {}
     full_description = text_value(data.get("detailed_description"))
     about = text_value(data.get("about_the_game"))
@@ -2152,6 +2568,15 @@ def parse_app_details(
         if isinstance(data.get("controllers"), list)
         else parse_controllers(data, store_html)
     )
+    tags, tag_localizations = parse_structured_tags(data, language=locale.requested)
+    if not tags:
+        tags, tag_localizations = parse_html_structured_tags(store_html, language=locale.requested)
+    genres, genre_localizations = parse_structured_genres(data, language=locale.requested)
+    workshop = parse_workshop_stats(
+        app_info if isinstance(app_info, dict) else data,
+        store_html,
+        app_id=app_id or 0,
+    )
     metacritic = data.get("metacritic") if isinstance(data.get("metacritic"), dict) else {}
     return {
         "localized": LocalizedGameInfo(
@@ -2171,6 +2596,7 @@ def parse_app_details(
         "app_id": app_id,
         "is_free": _parse_bool(data.get("is_free")),
         "vac_enabled": _parse_bool(data.get("vac_enabled")),
+        "required_age": _parse_int(data.get("required_age")),
         "external_account_notice": data.get("ext_user_account_notice"),
         "drm_notice": data.get("drm_notice"),
         "price": parse_price(data.get("price_overview")),
@@ -2187,6 +2613,12 @@ def parse_app_details(
             for item in _as_list(data.get("publishers"))
         ],
         "organizations": parse_organizations(data),
+        "tags": tags,
+        "tag_localizations": tag_localizations,
+        "genre_rows": genres,
+        "genre_localizations": genre_localizations,
+        "country_restrictions": parse_country_restrictions(data),
+        "workshop_stats": workshop,
         "release_date": minimum_date,
         "release_date_min": minimum_date,
         "release_date_max": maximum_date,
@@ -2239,14 +2671,16 @@ def parse_app_details(
         "package_ids": package_ids,
         "bundles": bundles,
         "bundle_prices": bundle_prices,
+        "diagnostics": list(browse_data.get("price_diagnostics", [])),
         "external_links": parse_external_links(data, store_html)
         + list(browse_data.get("external_links", [])),
         "deck_support": deck_support,
         "steam_deck": deck_support,
         "eulas": eulas,
         "controllers": controllers,
-        "controller_support": data.get("controller_support"),
-        "controller_support_level": _controller_support_level(data.get("controller_support")),
+        "controller_support": data.get("controller_support") or "none",
+        "controller_support_level": _controller_support_level(data.get("controller_support"))
+        or "none",
         "gamepad_preferred": _parse_bool(
             data.get("gamepad_preferred", data.get("gamepad_preference"))
         ),
@@ -2289,6 +2723,12 @@ __all__ = [
     "parse_languages_fallback",
     "parse_media",
     "parse_organizations",
+    "parse_structured_tags",
+    "parse_html_structured_tags",
+    "parse_html_creator_entities",
+    "parse_structured_genres",
+    "parse_country_restrictions",
+    "parse_workshop_stats",
     "parse_price",
     "parse_release_date",
     "parse_release_window",

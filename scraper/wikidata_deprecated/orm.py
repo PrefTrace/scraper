@@ -230,6 +230,15 @@ class SourceFact(Base):
 
 class SourceDiagnostic(Base):
     __tablename__ = "source_diagnostics"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "steam_app_id",
+            "scope",
+            "code",
+            name="uq_source_diagnostic_current",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), index=True)

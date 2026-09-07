@@ -46,7 +46,18 @@ STEAM_TABLES = (
     "steam_eulas",
     "steam_controllers",
     "steam_organization_credits",
+    "steam_organizations",
     "steam_supported_languages",
+    "steam_package_country_restrictions",
+    "steam_depots",
+    "steam_app_depots",
+    "steam_depot_os",
+    "steam_depot_manifests",
+    "steam_tags",
+    "steam_tag_localizations",
+    "steam_genres",
+    "steam_genre_localizations",
+    "steam_workshop_stats",
     "steam_build_branches",
     "steam_review_language_stats",
     "steam_reviews",
@@ -111,8 +122,7 @@ def _schema_audit(connection: sqlite3.Connection) -> dict[str, Any]:
             values = [
                 str(row[0])
                 for row in connection.execute(
-                    f'SELECT DISTINCT "{column}" FROM "{table}" '
-                    f'WHERE "{column}" IS NOT NULL'
+                    f'SELECT DISTINCT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL'
                 )
             ]
             table_values[column] = sorted(values)
@@ -162,9 +172,9 @@ def _boolean_distribution(
     return {
         str(row[0]): int(row[1])
         for row in connection.execute(
-            f'SELECT CASE WHEN "{column}" IS NULL THEN \'<null>\' '
-            f'WHEN "{column}" = 1 THEN \'true\' '
-            f'WHEN "{column}" = 0 THEN \'false\' '
+            f"SELECT CASE WHEN \"{column}\" IS NULL THEN '<null>' "
+            f"WHEN \"{column}\" = 1 THEN 'true' "
+            f"WHEN \"{column}\" = 0 THEN 'false' "
             f'ELSE CAST("{column}" AS TEXT) END, COUNT(*) '
             f'FROM "{table}" GROUP BY 1 ORDER BY 1'
         )
@@ -183,7 +193,7 @@ def _empty_string_violations(connection: sqlite3.Connection) -> dict[str, int]:
                 connection.execute(
                     f'SELECT COUNT(*) FROM "{table}" '
                     f'WHERE "{column}" IS NOT NULL '
-                    f'AND TRIM(CAST("{column}" AS TEXT)) = \'\''
+                    f"AND TRIM(CAST(\"{column}\" AS TEXT)) = ''"
                 ).fetchone()[0]
             )
             if count:
@@ -203,21 +213,69 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     total_price_rows = edition_price_rows + bundle_price_rows
     known_edition_prices = int(
         connection.execute(
-            "SELECT COUNT(*) FROM steam_edition_prices WHERE TRIM(currency) <> ''"
+            "SELECT COUNT(*) FROM steam_edition_prices WHERE TRIM(price_region) <> ''"
         ).fetchone()[0]
     )
     known_bundle_prices = int(
         connection.execute(
-            "SELECT COUNT(*) FROM steam_bundle_prices WHERE TRIM(currency) <> ''"
+            "SELECT COUNT(*) FROM steam_bundle_prices WHERE TRIM(price_region) <> ''"
         ).fetchone()[0]
     )
     known_price_rows = known_edition_prices + known_bundle_prices
+    known_currency_rows = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT currency FROM steam_edition_prices UNION ALL "
+            "SELECT currency FROM steam_bundle_prices) "
+            "WHERE currency IS NOT NULL AND TRIM(currency) <> ''"
+        ).fetchone()[0]
+    )
+    price_regions = {
+        str(row[0]): int(row[1])
+        for row in connection.execute(
+            "SELECT price_region, COUNT(*) FROM ("
+            "SELECT price_region FROM steam_edition_prices UNION ALL "
+            "SELECT price_region FROM steam_bundle_prices) GROUP BY price_region"
+        )
+        if row[0] is not None
+    }
+    currencies = {
+        str(row[0]): int(row[1])
+        for row in connection.execute(
+            "SELECT currency, COUNT(*) FROM ("
+            "SELECT currency FROM steam_edition_prices UNION ALL "
+            "SELECT currency FROM steam_bundle_prices) GROUP BY currency"
+        )
+        if row[0] is not None
+    }
+    price_consistency_violations = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT initial, final, discount_percent FROM steam_edition_prices UNION ALL "
+            "SELECT initial, final, effective_discount_percent FROM steam_bundle_prices"
+            ") WHERE initial IS NOT NULL AND final IS NOT NULL AND discount_percent IS NOT NULL "
+            "AND initial > 0 AND ABS(discount_percent - "
+            "ROUND((initial - final) * 100.0 / initial)) > 1"
+        ).fetchone()[0]
+    )
+    active_discounts_with_end = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_edition_prices "
+            "WHERE discount_percent > 0 AND discount_end_at IS NOT NULL"
+        ).fetchone()[0]
+    ) + int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_bundle_prices "
+            "WHERE effective_discount_percent > 0 AND discount_end_at IS NOT NULL"
+        ).fetchone()[0]
+    )
+    country_restrictions = int(
+        connection.execute("SELECT COUNT(*) FROM steam_package_country_restrictions").fetchone()[0]
+    )
     allowed_languages = set(STEAM_LANGUAGE_CODE_TO_BCP47.values())
     stored_languages = [
         str(row[0])
-        for row in connection.execute(
-            "SELECT DISTINCT language FROM steam_supported_languages"
-        )
+        for row in connection.execute("SELECT DISTINCT language FROM steam_supported_languages")
         if row[0] is not None
     ]
     invalid_languages = sorted(set(stored_languages) - allowed_languages)
@@ -258,9 +316,7 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
         connection.execute("SELECT COUNT(*) FROM steam_achievements").fetchone()[0]
     )
     localization_rows = int(
-        connection.execute(
-            "SELECT COUNT(*) FROM steam_achievement_localizations"
-        ).fetchone()[0]
+        connection.execute("SELECT COUNT(*) FROM steam_achievement_localizations").fetchone()[0]
     )
     achievement_scopes = {
         str(row[0]): int(row[1])
@@ -321,8 +377,7 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
         ),
         "normalized_rows": int(
             connection.execute(
-                "SELECT COUNT(*) FROM steam_descriptors "
-                "WHERE name IS NOT NULL AND TRIM(name) <> ''"
+                "SELECT COUNT(*) FROM steam_descriptors WHERE name IS NOT NULL AND TRIM(name) <> ''"
             ).fetchone()[0]
         ),
         "unresolved_rows": int(
@@ -341,9 +396,20 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
             "download_size_min IS NOT NULL OR disk_size_min IS NOT NULL"
         ).fetchone()[0]
     )
-    controller_support_distribution = _boolean_distribution(
-        connection, "steam_controllers", "support"
+    controller_rows = int(
+        connection.execute("SELECT COUNT(*) FROM steam_controllers").fetchone()[0]
     )
+    controller_types = {
+        str(row[0]): int(row[1])
+        for row in connection.execute(
+            "SELECT controller, COUNT(*) FROM steam_controllers "
+            "GROUP BY controller ORDER BY controller"
+        )
+    }
+    controller_transport = {
+        column: _boolean_distribution(connection, "steam_controllers", column)
+        for column in ("bluetooth", "usb")
+    }
     generic_external_links = int(
         connection.execute(
             "SELECT COUNT(*) FROM steam_external_links WHERE LOWER(type) = 'external'"
@@ -355,12 +421,97 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     }
     unresolved_editions = int(
         connection.execute(
-            "SELECT COUNT(*) FROM steam_editions WHERE resolved = 0"
+            "SELECT COUNT(*) FROM steam_editions WHERE name IS NULL AND description IS NULL"
         ).fetchone()[0]
     )
     review_language_nulls = int(
         connection.execute(
             "SELECT COUNT(*) FROM steam_review_language_stats WHERE language IS NULL"
+        ).fetchone()[0]
+    )
+    rating_rows = connection.execute(
+        "SELECT standard, rating, minimum_age FROM steam_age_ratings"
+    ).fetchall()
+    rating_minimum_age_coverage = sum(row[2] is not None for row in rating_rows)
+    rating_decodable_but_null = sum(
+        row[2] is None
+        and bool(row[1])
+        and (
+            str(row[0]).upper() == "PEGI"
+            and any(char.isdigit() for char in str(row[1]))
+            or str(row[0]).upper() in {"ESRB", "USK"}
+            and str(row[1]).upper() in {"EC", "E", "E10+", "T", "M", "AO"}
+        )
+        for row in rating_rows
+    )
+    depot_count = int(connection.execute("SELECT COUNT(*) FROM steam_depots").fetchone()[0])
+    shared_depot_count = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_depots WHERE depot_from_app IS NOT NULL"
+        ).fetchone()[0]
+    )
+    depot_os_count = int(connection.execute("SELECT COUNT(*) FROM steam_depot_os").fetchone()[0])
+    manifest_count = int(
+        connection.execute("SELECT COUNT(*) FROM steam_depot_manifests").fetchone()[0]
+    )
+    suspicious_zero_profiles = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_build_branches WHERE "
+            "download_size_min = 0 OR download_size_median = 0 OR download_size_max = 0 "
+            "OR disk_size_min = 0 OR disk_size_median = 0 OR disk_size_max = 0"
+        ).fetchone()[0]
+    )
+    tag_count = int(connection.execute("SELECT COUNT(*) FROM steam_tags").fetchone()[0])
+    tag_localization_count = int(
+        connection.execute("SELECT COUNT(*) FROM steam_tag_localizations").fetchone()[0]
+    )
+    genre_count = int(connection.execute("SELECT COUNT(*) FROM steam_genres").fetchone()[0])
+    genre_localization_count = int(
+        connection.execute("SELECT COUNT(*) FROM steam_genre_localizations").fetchone()[0]
+    )
+    organizations_resolved = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_organization_credits "
+            "WHERE creator_clan_account_id IS NOT NULL"
+        ).fetchone()[0]
+    )
+    organizations_unresolved = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_organization_credits WHERE creator_clan_account_id IS NULL"
+        ).fetchone()[0]
+    )
+    workshop_available = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_workshop_stats WHERE workshop_available = 1"
+        ).fetchone()[0]
+    )
+    workshop_item_coverage = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_workshop_stats WHERE published_file_count IS NOT NULL"
+        ).fetchone()[0]
+    )
+    workshop_collection_coverage = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_workshop_stats WHERE collection_count IS NOT NULL"
+        ).fetchone()[0]
+    )
+    duplicate_diagnostics = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM (SELECT source, steam_app_id, scope, code, COUNT(*) AS n "
+            "FROM source_diagnostics GROUP BY source, steam_app_id, scope, code HAVING n > 1)"
+        ).fetchone()[0]
+    )
+    orphan_packages = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_editions e WHERE NOT EXISTS "
+            "(SELECT 1 FROM steam_app_editions ae WHERE ae.package_id=e.package_id) AND NOT EXISTS "
+            "(SELECT 1 FROM steam_bundle_editions be WHERE be.package_id=e.package_id)"
+        ).fetchone()[0]
+    )
+    orphan_bundles = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_bundles b WHERE NOT EXISTS "
+            "(SELECT 1 FROM steam_bundle_editions be WHERE be.bundle_id=b.bundle_id)"
         ).fetchone()[0]
     )
     allowed_types = {"game", "application", "dlc", "soundtrack"}
@@ -380,6 +531,8 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
         and review_language_nulls == 0
         and set(app_types).issubset(allowed_types | {"<null>"})
         and set(release_status).issubset(allowed_release_states)
+        and price_consistency_violations == 0
+        and duplicate_diagnostics == 0
     )
     achievements_status = (
         "covered"
@@ -390,8 +543,14 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     )
     return {
         "ok": bool(core_ok and achievements_status == "covered"),
-        "known_currency": known_price_rows,
+        "known_price_regions": known_price_rows,
+        "known_currency": known_currency_rows,
         "total_price_rows": total_price_rows,
+        "price_regions": price_regions,
+        "currencies": currencies,
+        "price_consistency_violations": price_consistency_violations,
+        "active_discounts_with_end_at": active_discounts_with_end,
+        "country_restrictions": country_restrictions,
         "empty_string_violations": empty_strings,
         "nullable_boolean_distributions": boolean_distributions,
         "categories": unknown_category_rows,
@@ -402,12 +561,38 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
             "with_install_profiles": branch_profile_count,
             "coverage": branch_profile_count / branch_count if branch_count else None,
         },
-        "controllers": {
-            "support_distribution": controller_support_distribution,
-        },
+        "controllers": {"supported_rows": controller_rows},
+        "controller_types": controller_types,
+        "controller_transport": controller_transport,
         "generic_external_links": generic_external_links,
         "supported_language_flags": supported_language_flags,
         "review_language_nulls": review_language_nulls,
+        "rating_minimum_age": {
+            "coverage": rating_minimum_age_coverage,
+            "rows": len(rating_rows),
+            "decodable_but_null": rating_decodable_but_null,
+        },
+        "depots": {
+            "count": depot_count,
+            "shared_count": shared_depot_count,
+            "os_relations": depot_os_count,
+            "manifest_count": manifest_count,
+            "suspicious_zero_profiles": suspicious_zero_profiles,
+        },
+        "tags": {"count": tag_count, "localization_count": tag_localization_count},
+        "genres": {"count": genre_count, "localization_count": genre_localization_count},
+        "organizations": {
+            "resolved": organizations_resolved,
+            "unresolved": organizations_unresolved,
+        },
+        "workshop": {
+            "available": workshop_available,
+            "item_count_coverage": workshop_item_coverage,
+            "collection_count_coverage": workshop_collection_coverage,
+        },
+        "duplicate_diagnostics": duplicate_diagnostics,
+        "orphan_packages": orphan_packages,
+        "orphan_bundles": orphan_bundles,
         "soundtrack_catalog_coverage": {
             "status": "incomplete",
             "reason": "The active GetAppList catalog path has no include_music scope.",
@@ -455,9 +640,7 @@ async def run(
     )
     database = ScraperDatabase(config)
     steam_service = SteamGameSyncService(database)
-    pipeline = ScraperPipeline(
-        PipelineServices(steam=steam_service, wikidata=None)
-    )
+    pipeline = ScraperPipeline(PipelineServices(steam=steam_service, wikidata=None))
     metrics = HttpMetrics()
     original_get: Any = httpx.AsyncClient.get
 
@@ -524,9 +707,7 @@ async def run(
     schema_contract_ok = bool(audit["ok"])
     parser_semantics_ok = bool(positive_controls["ok"])
     persistence_ok = integrity == "ok" and not foreign_key_errors
-    benchmark_control_cases_ok = bool(
-        positive_controls["ok"] and coverage["core_semantics_ok"]
-    )
+    benchmark_control_cases_ok = bool(positive_controls["ok"] and coverage["core_semantics_ok"])
     queue_statuses = Counter(state.status for state in states)
     benchmark: dict[str, Any] = {
         "source": "Steam",
@@ -606,6 +787,12 @@ async def run(
         "",
         f"- Currency: `{coverage['known_currency']}/{coverage['total_price_rows']}` "
         "rows have authoritative Steam currency.",
+        f"- Price regions: `{coverage['known_price_regions']}/{coverage['total_price_rows']}` "
+        f"rows; distribution: `{coverage['price_regions']}`; "
+        f"currencies: `{coverage['currencies']}`.",
+        f"- Price consistency violations: `{coverage['price_consistency_violations']}`; "
+        f"active discounts with end_at: `{coverage['active_discounts_with_end_at']}`.",
+        f"- Explicit country restrictions: `{coverage['country_restrictions']}`.",
         f"- Empty-string violations: `{len(coverage['empty_string_violations'])}` fields.",
         f"- Unresolved editions: `{coverage['unresolved_editions']}`.",
         f"- Build install-profile coverage: `{coverage['branch_profiles']['coverage']}`.",
@@ -616,10 +803,17 @@ async def run(
         f"{coverage['achievements']['localization_rows']} localization rows).",
         f"- Supported-language invariant: `{coverage['supported_language_invariant']['ok']}`.",
         f"- Review-language NULL rows: `{coverage['review_language_nulls']}`.",
+        f"- Rating minimum_age: `{coverage['rating_minimum_age']}`.",
+        f"- Controllers: `{coverage['controller_types']}`; "
+        f"transport: `{coverage['controller_transport']}`.",
+        f"- Depots: `{coverage['depots']}`.",
+        f"- Tags: `{coverage['tags']}`; genres: `{coverage['genres']}`.",
+        f"- Organizations: `{coverage['organizations']}`; Workshop: `{coverage['workshop']}`.",
+        f"- Duplicate diagnostics: `{coverage['duplicate_diagnostics']}`; "
+        f"orphan packages/bundles: `{coverage['orphan_packages']}/{coverage['orphan_bundles']}`.",
         f"- Soundtrack catalog: `{coverage['soundtrack_catalog_coverage']['status']}`.",
         f"- Orphan bundle editions: `{coverage['orphan_bundle_edition_rows']}`.",
-        "- Bundle membership distribution: "
-        f"`{bundle_distribution_text}`.",
+        f"- Bundle membership distribution: `{bundle_distribution_text}`.",
         "",
         "## Positive controls",
         "",

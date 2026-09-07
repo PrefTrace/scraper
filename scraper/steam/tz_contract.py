@@ -63,6 +63,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "windows_build": _c("BOOLEAN", True),
             "mac_build": _c("BOOLEAN", True),
             "vac_enabled": _c("BOOLEAN", True),
+            "required_age": _c("INTEGER", True),
             "metacritic_score": _c("INTEGER", True),
             "metacritic_url": _c("TEXT", True),
             "gamepad_preferred": _c("BOOLEAN", True),
@@ -141,7 +142,6 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "package_id": _c("INTEGER"),
             "name": _c("TEXT", True),
             "description": _c("TEXT", True),
-            "resolved": _c("BOOLEAN"),
         },
         technical={},
         primary_key=("package_id",),
@@ -149,16 +149,19 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
     "steam_edition_prices": T(
         domain={
             "package_id": _c("INTEGER"),
-            "currency": _c("TEXT"),
+            "price_region": _c("TEXT"),
+            "currency": _c("TEXT", True),
             "initial": _c("INTEGER", True),
             "final": _c("INTEGER", True),
             "discount_percent": _c("INTEGER", True),
+            "discount_description": _c("TEXT", True),
+            "discount_end_at": _c("DATETIME", True),
             "price_type": _c("TEXT", True),
             "period": _c("TEXT", True),
             "period_units": _c("INTEGER", True),
         },
         technical={},
-        primary_key=("package_id", "currency"),
+        primary_key=("package_id", "price_region"),
         foreign_keys=(_fk(("package_id",), "steam_editions", ("package_id",)),),
         literals={
             "price_type": frozenset({"one_time", "recurring"}),
@@ -195,13 +198,16 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
     "steam_bundle_prices": T(
         domain={
             "bundle_id": _c("INTEGER"),
-            "currency": _c("TEXT"),
+            "price_region": _c("TEXT"),
+            "currency": _c("TEXT", True),
             "effective_discount_percent": _c("INTEGER", True),
             "initial": _c("INTEGER", True),
             "final": _c("INTEGER", True),
+            "discount_description": _c("TEXT", True),
+            "discount_end_at": _c("DATETIME", True),
         },
         technical={},
-        primary_key=("bundle_id", "currency"),
+        primary_key=("bundle_id", "price_region"),
         foreign_keys=(_fk(("bundle_id",), "steam_bundles", ("bundle_id",)),),
     ),
     "steam_external_links": T(
@@ -293,7 +299,6 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         domain={
             "app_id": _c("INTEGER"),
             "controller": _c("TEXT"),
-            "support": _c("BOOLEAN", True),
             "bluetooth": _c("BOOLEAN", True),
             "usb": _c("BOOLEAN", True),
         },
@@ -302,11 +307,32 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
     ),
     "steam_organization_credits": T(
-        domain={"app_id": _c("INTEGER"), "status": _c("TEXT"), "organization_name": _c("TEXT")},
+        domain={
+            "app_id": _c("INTEGER"),
+            "status": _c("TEXT"),
+            "creator_clan_account_id": _c("INTEGER", True),
+            "credited_name": _c("TEXT"),
+        },
         technical={"id": _c("INTEGER")},
         primary_key=("id",),
-        unique_keys=(("app_id", "status", "organization_name"),),
-        foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
+        unique_keys=(("app_id", "status", "creator_clan_account_id", "credited_name"),),
+        foreign_keys=(
+            _fk(("app_id",), "steam_apps", ("app_id",)),
+            _fk(("creator_clan_account_id",), "steam_organizations", ("creator_clan_account_id",)),
+        ),
+    ),
+    "steam_organizations": T(
+        domain={
+            "creator_clan_account_id": _c("INTEGER"),
+            "slug": _c("TEXT", True),
+            "name": _c("TEXT", True),
+            "homepage": _c("TEXT", True),
+            "follower_count": _c("INTEGER", True),
+            "logo_url": _c("TEXT", True),
+            "background_url": _c("TEXT", True),
+        },
+        technical={},
+        primary_key=("creator_clan_account_id",),
     ),
     "steam_supported_languages": T(
         domain={
@@ -336,6 +362,92 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         },
         technical={},
         primary_key=("app_id", "name"),
+        foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
+    ),
+    "steam_package_country_restrictions": T(
+        domain={
+            "package_id": _c("INTEGER"),
+            "restriction_type": _c("TEXT"),
+            "country_code": _c("TEXT"),
+        },
+        technical={},
+        primary_key=("package_id", "restriction_type", "country_code"),
+        foreign_keys=(_fk(("package_id",), "steam_editions", ("package_id",)),),
+    ),
+    "steam_depots": T(
+        domain={
+            "depot_id": _c("INTEGER"),
+            "name": _c("TEXT", True),
+            "language": _c("TEXT", True),
+            "architecture": _c("TEXT", True),
+            "low_violence": _c("BOOLEAN", True),
+            "dlc_app_id": _c("INTEGER", True),
+            "optional_dlc_app_id": _c("INTEGER", True),
+            "depot_from_app": _c("INTEGER", True),
+            "shared_install": _c("BOOLEAN", True),
+            "system_defined": _c("BOOLEAN", True),
+        },
+        technical={},
+        primary_key=("depot_id",),
+    ),
+    "steam_app_depots": T(
+        domain={"app_id": _c("INTEGER"), "depot_id": _c("INTEGER")},
+        technical={},
+        primary_key=("app_id", "depot_id"),
+        foreign_keys=(
+            _fk(("app_id",), "steam_apps", ("app_id",)),
+            _fk(("depot_id",), "steam_depots", ("depot_id",)),
+        ),
+    ),
+    "steam_depot_os": T(
+        domain={"depot_id": _c("INTEGER"), "os": _c("TEXT")},
+        technical={},
+        primary_key=("depot_id", "os"),
+        foreign_keys=(_fk(("depot_id",), "steam_depots", ("depot_id",)),),
+    ),
+    "steam_depot_manifests": T(
+        domain={
+            "depot_id": _c("INTEGER"),
+            "branch": _c("TEXT"),
+            "manifest_id": _c("TEXT", True),
+            "download_size": _c("INTEGER", True),
+            "disk_size": _c("INTEGER", True),
+        },
+        technical={},
+        primary_key=("depot_id", "branch"),
+        foreign_keys=(_fk(("depot_id",), "steam_depots", ("depot_id",)),),
+    ),
+    "steam_tags": T(
+        domain={"app_id": _c("INTEGER"), "tag_id": _c("INTEGER"), "weight": _c("INTEGER", True)},
+        technical={},
+        primary_key=("app_id", "tag_id"),
+        foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
+    ),
+    "steam_tag_localizations": T(
+        domain={"tag_id": _c("INTEGER"), "language": _c("TEXT"), "name": _c("TEXT")},
+        technical={},
+        primary_key=("tag_id", "language"),
+    ),
+    "steam_genres": T(
+        domain={"app_id": _c("INTEGER"), "genre_id": _c("INTEGER")},
+        technical={},
+        primary_key=("app_id", "genre_id"),
+        foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
+    ),
+    "steam_genre_localizations": T(
+        domain={"genre_id": _c("INTEGER"), "language": _c("TEXT"), "name": _c("TEXT")},
+        technical={},
+        primary_key=("genre_id", "language"),
+    ),
+    "steam_workshop_stats": T(
+        domain={
+            "app_id": _c("INTEGER"),
+            "workshop_available": _c("BOOLEAN", True),
+            "published_file_count": _c("INTEGER", True),
+            "collection_count": _c("INTEGER", True),
+        },
+        technical={},
+        primary_key=("app_id",),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
     ),
     "steam_review_language_stats": T(
@@ -547,12 +659,10 @@ def audit_steam_tz_schema(connection: sqlite3.Connection) -> dict[str, Any]:
         expected_fk = set(contract.foreign_keys)
         item["foreign_key_mismatch"] = {
             "missing": [
-                _foreign_key_payload(value)
-                for value in sorted(expected_fk - actual_fk, key=repr)
+                _foreign_key_payload(value) for value in sorted(expected_fk - actual_fk, key=repr)
             ],
             "unexpected": [
-                _foreign_key_payload(value)
-                for value in sorted(actual_fk - expected_fk, key=repr)
+                _foreign_key_payload(value) for value in sorted(actual_fk - expected_fk, key=repr)
             ],
         }
         per_table[table] = item

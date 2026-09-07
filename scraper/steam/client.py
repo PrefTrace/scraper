@@ -89,6 +89,19 @@ class SteamClient:
         )
         return response.text
 
+    async def workshop_page(self, app_id: int, *, section: str = "readytouseitems") -> str:
+        """Fetch the public anonymous Workshop browse page."""
+
+        response = await self._get(
+            "https://steamcommunity.com/workshop/browse/",
+            params={
+                "appid": app_id,
+                "browsesort": "trend",
+                "section": section,
+            },
+        )
+        return response.text
+
     async def achievements_page(self, app_id: int, locale: LocaleInfo) -> str:
         response = await self._get(
             f"https://steamcommunity.com/stats/{app_id}/achievements/",
@@ -148,7 +161,9 @@ class SteamClient:
             raw_categories = (
                 response_data.get("categories")
                 if isinstance(response_data, dict)
-                else payload.get("categories") if isinstance(payload, dict) else None
+                else payload.get("categories")
+                if isinstance(payload, dict)
+                else None
             )
             registry: dict[int, str] = {}
             for raw in raw_categories if isinstance(raw_categories, list) else []:
@@ -300,6 +315,7 @@ class SteamClient:
         if not normalized_ids:
             return {}
         result: dict[int, dict[str, Any]] = {}
+
         async def fetch_one(package_id: int) -> tuple[int, dict[str, Any] | None]:
             try:
                 response = await self._get(

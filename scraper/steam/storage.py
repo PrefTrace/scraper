@@ -21,6 +21,7 @@ from .orm import (
     SteamAchievementLocalization,
     SteamAgeRating,
     SteamApp,
+    SteamAppDepot,
     SteamAppEdition,
     SteamAppLocalization,
     SteamBuildBranch,
@@ -28,6 +29,9 @@ from .orm import (
     SteamBundleEdition,
     SteamBundlePrice,
     SteamController,
+    SteamDepot,
+    SteamDepotManifest,
+    SteamDepotOs,
     SteamDescriptor,
     SteamEdition,
     SteamEditionPrice,
@@ -35,12 +39,19 @@ from .orm import (
     SteamExternalLink,
     SteamExternalReview,
     SteamFeature,
+    SteamGenre,
+    SteamGenreLocalization,
     SteamMedia,
+    SteamOrganization,
     SteamOrganizationCredit,
+    SteamPackageCountryRestriction,
     SteamReview,
     SteamReviewLanguageStat,
     SteamSupportedLanguage,
     SteamSystemRequirement,
+    SteamTag,
+    SteamTagLocalization,
+    SteamWorkshopStats,
 )
 from .orm import SteamDeckSupport as SteamDeckSupportRow
 
@@ -112,6 +123,11 @@ def _currency(value: object) -> str:
 
     currency = _field(value, "currency")
     return str(currency).strip().upper() if currency not in (None, "") else ""
+
+
+def _price_region(value: object) -> str:
+    region = _field(value, "price_region")
+    return str(region).strip().upper() if region not in (None, "") else ""
 
 
 def _age_id(app_id: int, value: object) -> str:
@@ -201,8 +217,15 @@ async def remove_steam_scope(
                 SteamFeature,
                 SteamAccessibilityFeature,
                 SteamOrganizationCredit,
+                SteamGenre,
             ):
                 await session.execute(delete(model).where(model.app_id == app_id))
+            package_ids = select(SteamAppEdition.package_id).where(SteamAppEdition.app_id == app_id)
+            await session.execute(
+                delete(SteamPackageCountryRestriction).where(
+                    SteamPackageCountryRestriction.package_id.in_(package_ids)
+                )
+            )
         if writes_global:
             await session.execute(
                 delete(SteamExternalLink).where(SteamExternalLink.app_id == app_id)
@@ -219,6 +242,10 @@ async def remove_steam_scope(
             )
             await session.execute(delete(SteamEula).where(SteamEula.app_id == app_id))
             await session.execute(delete(SteamController).where(SteamController.app_id == app_id))
+            await session.execute(delete(SteamTag).where(SteamTag.app_id == app_id))
+            await session.execute(
+                delete(SteamWorkshopStats).where(SteamWorkshopStats.app_id == app_id)
+            )
             await session.execute(
                 delete(SteamExternalReview).where(SteamExternalReview.app_id == app_id)
             )
@@ -231,9 +258,7 @@ async def remove_steam_scope(
             )
         )
         if _is_english_language(language):
-            await session.execute(
-                delete(SteamAchievement).where(SteamAchievement.app_id == app_id)
-            )
+            await session.execute(delete(SteamAchievement).where(SteamAchievement.app_id == app_id))
     elif kind == "rating":
         language = scope.split(":", maxsplit=2)[1]
         await session.execute(
@@ -252,23 +277,13 @@ async def remove_steam_scope(
         )
     elif kind == "branches":
         await session.execute(delete(SteamBuildBranch).where(SteamBuildBranch.app_id == app_id))
+        await session.execute(delete(SteamAppDepot).where(SteamAppDepot.app_id == app_id))
 
 
 async def remove_all_steam_data(session: AsyncSession, app_id: int) -> None:
     age_ids = select(SteamAgeRating.age_id).where(SteamAgeRating.app_id == app_id)
-    await session.execute(
-        delete(SteamDescriptor).where(SteamDescriptor.age_id.in_(age_ids))
-    )
+    await session.execute(delete(SteamDescriptor).where(SteamDescriptor.age_id.in_(age_ids)))
     package_ids = select(SteamAppEdition.package_id).where(SteamAppEdition.app_id == app_id)
-    bundle_ids = select(SteamBundleEdition.bundle_id).where(
-        SteamBundleEdition.package_id.in_(package_ids)
-    )
-    await session.execute(
-        delete(SteamEditionPrice).where(SteamEditionPrice.package_id.in_(package_ids))
-    )
-    await session.execute(
-        delete(SteamBundlePrice).where(SteamBundlePrice.bundle_id.in_(bundle_ids))
-    )
     await session.execute(
         delete(SteamBundleEdition).where(SteamBundleEdition.package_id.in_(package_ids))
     )
@@ -290,14 +305,17 @@ async def remove_all_steam_data(session: AsyncSession, app_id: int) -> None:
         SteamReview,
         SteamExternalLink,
         SteamExternalReview,
+        SteamTag,
+        SteamGenre,
+        SteamWorkshopStats,
+        SteamAppDepot,
     ):
         await session.execute(delete(model).where(model.app_id == app_id))
     await session.execute(
-        delete(SteamAchievementLocalization).where(
-            SteamAchievementLocalization.app_id == app_id
-        )
+        delete(SteamAchievementLocalization).where(SteamAchievementLocalization.app_id == app_id)
     )
     await session.execute(delete(SteamAchievement).where(SteamAchievement.app_id == app_id))
+    await session.execute(delete(SteamAppDepot).where(SteamAppDepot.app_id == app_id))
     await session.execute(delete(SteamApp).where(SteamApp.app_id == app_id))
     orphan_packages = select(SteamEdition.package_id).where(
         ~SteamEdition.package_id.in_(select(SteamAppEdition.package_id)),
@@ -346,7 +364,8 @@ async def _persist_details(
         app.metacritic_score = metacritic_score
         app.metacritic_url = source_data.get("metacritic_url")
         app.gamepad_preferred = source_data.get("gamepad_preferred")
-        app.controller_support = source_data.get("controller_support_level")
+        app.controller_support = source_data.get("controller_support_level") or "none"
+        app.required_age = source_data.get("required_age")
         app.release_date = source_data.get("release_date")
         app.release_date_max = source_data.get("release_date_max")
         app.release_status = source_data.get("release_status")
@@ -416,19 +435,7 @@ async def _persist_details(
     )
     old_package_ids = list(old_links)
     if old_package_ids:
-        await session.execute(
-            delete(SteamAppEdition).where(SteamAppEdition.app_id == app_id)
-        )
-        await session.execute(
-            delete(SteamEditionPrice).where(
-                SteamEditionPrice.package_id.in_(old_package_ids),
-            )
-        )
-        await session.execute(
-            delete(SteamBundleEdition).where(
-                SteamBundleEdition.package_id.in_(old_package_ids)
-            )
-        )
+        await session.execute(delete(SteamAppEdition).where(SteamAppEdition.app_id == app_id))
     package_ids: set[int] = set()
     edition_links: list[int] = []
     for item in _items(data.get("editions")):
@@ -447,7 +454,6 @@ async def _persist_details(
             edition.name = name
         if description is not None:
             edition.description = description
-        edition.resolved = bool(edition.name or edition.description)
         edition_links.append(package_id)
     await session.flush()
     for package_id in dict.fromkeys(edition_links):
@@ -456,21 +462,29 @@ async def _persist_details(
             session.add(SteamAppEdition(app_id=app_id, package_id=package_id))
     for item in _items(data.get("edition_prices")):
         package_id = _field(item, "package_id")
+        price_region = _price_region(item)
         currency = _currency(item)
-        if package_id is None or not currency:
+        if package_id is None or not price_region:
             continue
-        session.add(
-            SteamEditionPrice(
-                package_id=int(package_id),
-                currency=currency,
-                initial=_field(item, "initial"),
-                final=_field(item, "final"),
-                discount_percent=_field(item, "discount_percent"),
-                price_type=_field(item, "price_type"),
-                period=_field(item, "period"),
-                period_units=_field(item, "period_units"),
+        values = {
+            "currency": currency or None,
+            "initial": _field(item, "initial"),
+            "final": _field(item, "final"),
+            "discount_percent": _field(item, "discount_percent"),
+            "discount_description": _text(_field(item, "discount_description")),
+            "discount_end_at": _field(item, "discount_end_at"),
+            "price_type": _field(item, "price_type"),
+            "period": _field(item, "period"),
+            "period_units": _field(item, "period_units"),
+        }
+        price_row = await session.get(SteamEditionPrice, (int(package_id), price_region))
+        if price_row is None:
+            session.add(
+                SteamEditionPrice(package_id=int(package_id), price_region=price_region, **values)
             )
-        )
+        else:
+            for field_name, value in values.items():
+                setattr(price_row, field_name, value)
     await session.flush()
     for item in _items(data.get("edition_metadata")):
         package_id = _field(item, "package_id")
@@ -478,7 +492,7 @@ async def _persist_details(
             continue
         edition = await session.get(SteamEdition, int(package_id))
         if edition is None:
-            edition = SteamEdition(package_id=int(package_id), resolved=False)
+            edition = SteamEdition(package_id=int(package_id))
             session.add(edition)
         name = _text(_field(item, "name"))
         description = _text(_field(item, "description"))
@@ -486,7 +500,6 @@ async def _persist_details(
             edition.name = name
         if description is not None:
             edition.description = description
-        edition.resolved = bool(edition.name or edition.description)
     await session.flush()
 
     current_bundle_ids = {
@@ -496,14 +509,10 @@ async def _persist_details(
     }
     if current_bundle_ids:
         await session.execute(
-            delete(SteamBundleEdition).where(
-                SteamBundleEdition.bundle_id.in_(current_bundle_ids)
-            )
+            delete(SteamBundleEdition).where(SteamBundleEdition.bundle_id.in_(current_bundle_ids))
         )
         await session.execute(
-            delete(SteamBundlePrice).where(
-                SteamBundlePrice.bundle_id.in_(current_bundle_ids)
-            )
+            delete(SteamBundlePrice).where(SteamBundlePrice.bundle_id.in_(current_bundle_ids))
         )
     for item in _items(data.get("bundles")):
         bundle_id = _field(item, "bundle_id")
@@ -521,7 +530,7 @@ async def _persist_details(
             package_id = int(package_id)
             included_edition = await session.get(SteamEdition, package_id)
             if included_edition is None:
-                session.add(SteamEdition(package_id=package_id, resolved=False))
+                session.add(SteamEdition(package_id=package_id))
                 await session.flush()
             link = await session.get(
                 SteamBundleEdition,
@@ -531,22 +540,28 @@ async def _persist_details(
                 session.add(SteamBundleEdition(bundle_id=bundle_id, package_id=package_id))
     for item in _items(data.get("bundle_prices")):
         bundle_id = _field(item, "bundle_id")
+        price_region = _price_region(item)
         currency = _currency(item)
-        if bundle_id is None or not currency:
+        if bundle_id is None or not price_region:
             continue
-        session.add(
-            SteamBundlePrice(
-                bundle_id=int(bundle_id),
-                currency=currency,
-                effective_discount_percent=_field(
-                    item,
-                    "effective_discount_percent",
-                    _field(item, "discount_percent"),
-                ),
-                initial=_field(item, "initial"),
-                final=_field(item, "final"),
+        values = {
+            "currency": currency or None,
+            "effective_discount_percent": _field(
+                item, "effective_discount_percent", _field(item, "discount_percent")
+            ),
+            "initial": _field(item, "initial"),
+            "final": _field(item, "final"),
+            "discount_description": _text(_field(item, "discount_description")),
+            "discount_end_at": _field(item, "discount_end_at"),
+        }
+        price_row = await session.get(SteamBundlePrice, (int(bundle_id), price_region))
+        if price_row is None:
+            session.add(
+                SteamBundlePrice(bundle_id=int(bundle_id), price_region=price_region, **values)
             )
-        )
+        else:
+            for field_name, value in values.items():
+                setattr(price_row, field_name, value)
 
     orphan_packages = select(SteamEdition.package_id).where(
         ~SteamEdition.package_id.in_(select(SteamAppEdition.package_id)),
@@ -574,7 +589,7 @@ async def _persist_details(
                 app_id=app_id,
                 standard=str(_field(item, "authority") or age_id),
                 rating=_field(item, "rating"),
-                minimum_age=_field(item, "required_age"),
+                minimum_age=_field(item, "minimum_age", _field(item, "required_age")),
                 rating_generated=_field(item, "rating_generated"),
                 use_age_gate=_field(item, "use_age_gate"),
                 banned=_field(item, "banned"),
@@ -582,6 +597,8 @@ async def _persist_details(
             )
         )
     for item in _items(data.get("descriptors")):
+        from .parsers import normalize_descriptor_text
+
         descriptor_age_id = _age_id(app_id, _field(item, "age_id"))
         if descriptor_age_id not in age_rating_ids:
             age_rating_ids.add(descriptor_age_id)
@@ -593,13 +610,20 @@ async def _persist_details(
                     descriptor_raw="content_descriptors",
                 )
             )
-        session.add(
-            SteamDescriptor(
-                age_id=descriptor_age_id,
-                steam_id=_field(item, "steam_id"),
-                name=_text(_field(item, "name")),
-            )
+        descriptor_name = _text(_field(item, "name"))
+        descriptor_names = (
+            normalize_descriptor_text(descriptor_name, language="en")
+            if _field(item, "steam_id") is not None and descriptor_name
+            else [descriptor_name]
         )
+        for normalized_name in descriptor_names:
+            session.add(
+                SteamDescriptor(
+                    age_id=descriptor_age_id,
+                    steam_id=_field(item, "steam_id"),
+                    name=normalized_name,
+                )
+            )
     for item in _items(data.get("system_requirements")):
         if not isinstance(item, SystemRequirement) and not isinstance(item, dict):
             continue
@@ -624,9 +648,7 @@ async def _persist_details(
             SteamFeature(
                 app_id=app_id,
                 category_id=category_id,
-                english_name=_text(
-                    _field(item, "name") or _field(item, "description")
-                ),
+                english_name=_text(_field(item, "name") or _field(item, "description")),
             )
         )
     for item in _items(data.get("accessibility_features")):
@@ -641,7 +663,7 @@ async def _persist_details(
             )
         )
     for item in _items(data.get("organizations")):
-        organization_name = _text(_field(item, "name"))
+        organization_name = _text(_field(item, "credited_name", _field(item, "name")))
         status = _text(_field(item, "status"))
         if not organization_name or not status:
             continue
@@ -649,9 +671,56 @@ async def _persist_details(
             SteamOrganizationCredit(
                 app_id=app_id,
                 status=status,
-                organization_name=organization_name,
+                creator_clan_account_id=_field(item, "creator_clan_account_id"),
+                credited_name=organization_name,
             )
         )
+    for item in _items(data.get("organization_entities")):
+        creator_id = _field(item, "creator_clan_account_id")
+        if creator_id is None:
+            continue
+        organization = await session.get(SteamOrganization, int(creator_id))
+        if organization is None:
+            organization = SteamOrganization(creator_clan_account_id=int(creator_id))
+            session.add(organization)
+        for field_name in ("slug", "name", "homepage", "logo_url", "background_url"):
+            value = _field(item, field_name)
+            if value is not None:
+                setattr(organization, field_name, _text(value))
+        follower_count = _field(item, "follower_count")
+        if follower_count is not None:
+            organization.follower_count = int(follower_count)
+    for item in _items(data.get("country_restrictions")):
+        package_id = _field(item, "package_id")
+        restriction_type = _text(_field(item, "restriction_type"))
+        country_code = _text(_field(item, "country_code"))
+        if package_id is None or not restriction_type or not country_code:
+            continue
+        session.add(
+            SteamPackageCountryRestriction(
+                package_id=int(package_id),
+                restriction_type=restriction_type,
+                country_code=country_code.upper(),
+            )
+        )
+    for item in _items(data.get("genre_rows")):
+        genre_id = _field(item, "genre_id")
+        if genre_id is None:
+            continue
+        session.add(SteamGenre(app_id=app_id, genre_id=int(genre_id)))
+    for item in _items(data.get("genre_localizations")):
+        genre_id = _field(item, "genre_id")
+        language = _text(_field(item, "language"))
+        name = _text(_field(item, "name"))
+        if genre_id is None or not language or not name:
+            continue
+        row = await session.get(SteamGenreLocalization, (int(genre_id), language))
+        if row is None:
+            session.add(
+                SteamGenreLocalization(genre_id=int(genre_id), language=language, name=name)
+            )
+        else:
+            row.name = name
     for item in _items(data.get("external_links")):
         if _field(item, "url") is None and _field(item, "value") is None:
             continue
@@ -663,6 +732,8 @@ async def _persist_details(
                 value=_text(_field(item, "value")),
             )
         )
+
+
 async def _persist_store(
     session: AsyncSession,
     app_id: int,
@@ -687,13 +758,16 @@ async def _persist_store(
         if not language or language in seen_languages:
             continue
         seen_languages.add(str(language))
+        text_flag = _field(item, "text", _field(item, "interface"))
+        audio_flag = _field(item, "audio", _field(item, "full_audio"))
+        subtitles_flag = _field(item, "subtitles")
         session.add(
             SteamSupportedLanguage(
                 app_id=app_id,
                 language=str(language),
-                text=bool(_field(item, "text", _field(item, "interface"))),
-                audio=bool(_field(item, "audio", _field(item, "full_audio"))),
-                subtitles=bool(_field(item, "subtitles")),
+                text=None if text_flag is None else bool(text_flag),
+                audio=None if audio_flag is None else bool(audio_flag),
+                subtitles=None if subtitles_flag is None else bool(subtitles_flag),
             )
         )
     for item in _items(data.get("accessibility_features")):
@@ -719,9 +793,7 @@ async def _persist_store(
             SteamEula(
                 app_id=app_id,
                 eula_id=_field(item, "id"),
-                name_description=_text(
-                    _field(item, "name_description", _field(item, "name"))
-                ),
+                name_description=_text(_field(item, "name_description", _field(item, "name"))),
                 url=_text(_field(item, "url")),
                 version=_text(_field(item, "version")),
             )
@@ -734,13 +806,40 @@ async def _persist_store(
             SteamController(
                 app_id=app_id,
                 controller=str(name),
-                support=_field(item, "support")
-                if _field(item, "support") is not None
-                else None,
                 bluetooth=_field(item, "bluetooth"),
                 usb=_field(item, "usb"),
             )
         )
+    for item in _items(data.get("structured_tags", data.get("tags"))):
+        tag_id = _field(item, "tag_id")
+        if tag_id is not None:
+            session.add(
+                SteamTag(
+                    app_id=app_id,
+                    tag_id=int(tag_id),
+                    weight=_field(item, "weight"),
+                )
+            )
+    for item in _items(data.get("tag_localizations")):
+        tag_id = _field(item, "tag_id")
+        language = _text(_field(item, "language"))
+        name = _text(_field(item, "name"))
+        if tag_id is None or not language or not name:
+            continue
+        row = await session.get(SteamTagLocalization, (int(tag_id), language))
+        if row is None:
+            session.add(SteamTagLocalization(tag_id=int(tag_id), language=language, name=name))
+        else:
+            row.name = name
+    workshop = data.get("workshop_stats")
+    if workshop is not None:
+        row = await session.get(SteamWorkshopStats, app_id)
+        if row is None:
+            row = SteamWorkshopStats(app_id=app_id)
+            session.add(row)
+        row.workshop_available = _field(workshop, "workshop_available")
+        row.published_file_count = _field(workshop, "published_file_count")
+        row.collection_count = _field(workshop, "collection_count")
     for item in _items(data.get("external_reviews")):
         organization = _field(item, "organization")
         if not organization:
@@ -781,9 +880,7 @@ async def _persist_achievements(
         normalized_name = _text(name)
         if not normalized_name:
             continue
-        localization = await session.get(
-            SteamAchievementLocalization, (app_id, str(key), language)
-        )
+        localization = await session.get(SteamAchievementLocalization, (app_id, str(key), language))
         if localization is None:
             localization = SteamAchievementLocalization(
                 app_id=app_id,
@@ -872,6 +969,8 @@ async def _persist_branches(
     app_id: int,
     data: object,
 ) -> None:
+    await session.execute(delete(SteamBuildBranch).where(SteamBuildBranch.app_id == app_id))
+    await session.execute(delete(SteamAppDepot).where(SteamAppDepot.app_id == app_id))
     values = data.get("branches") if isinstance(data, dict) else data
     for item in _items(values):
         if not isinstance(item, BuildBranch) and not isinstance(item, dict):
@@ -894,6 +993,55 @@ async def _persist_branches(
                 disk_size_max=_field(item, "disk_size_max"),
             )
         )
+    if not isinstance(data, dict):
+        return
+    for item in _items(data.get("depots")):
+        depot_id = _field(item, "depot_id")
+        if depot_id is None:
+            continue
+        row = await session.get(SteamDepot, int(depot_id))
+        if row is None:
+            row = SteamDepot(depot_id=int(depot_id))
+            session.add(row)
+        for field_name in (
+            "name",
+            "language",
+            "architecture",
+            "low_violence",
+            "dlc_app_id",
+            "optional_dlc_app_id",
+            "depot_from_app",
+            "shared_install",
+            "system_defined",
+        ):
+            value = _field(item, field_name)
+            if value is not None:
+                setattr(row, field_name, value)
+        if await session.get(SteamAppDepot, (app_id, int(depot_id))) is None:
+            session.add(SteamAppDepot(app_id=app_id, depot_id=int(depot_id)))
+    for raw in _items(data.get("depot_os")):
+        if isinstance(raw, (tuple, list)) and len(raw) == 2:
+            depot_id, operating_system = raw
+        else:
+            depot_id = _field(raw, "depot_id")
+            operating_system = _field(raw, "os")
+        if depot_id is not None and operating_system:
+            key = (int(depot_id), str(operating_system))
+            if await session.get(SteamDepotOs, key) is None:
+                session.add(SteamDepotOs(depot_id=key[0], os=key[1]))
+    for item in _items(data.get("manifests")):
+        depot_id = _field(item, "depot_id")
+        branch = _text(_field(item, "branch"))
+        if depot_id is None or not branch:
+            continue
+        key = (int(depot_id), branch)
+        manifest = await session.get(SteamDepotManifest, key)
+        if manifest is None:
+            manifest = SteamDepotManifest(depot_id=key[0], branch=key[1])
+            session.add(manifest)
+        manifest.manifest_id = _text(_field(item, "manifest_id"))
+        manifest.download_size = _field(item, "download_size")
+        manifest.disk_size = _field(item, "disk_size")
 
 
 __all__ = ["persist_steam_scope", "remove_all_steam_data", "remove_steam_scope"]

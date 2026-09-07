@@ -1,286 +1,157 @@
-ВАЖНО!!! ЭТО НЕ ОБЬЕДЕНЕННЫЕ ДАННЫЕ - лишь первчиный маппинг по тому (мы не дублируем таблицы, а перерабатываем так, как удобно хранить, но по смыслу очень близко), как их понимает первоисточник, мердж источников - отдельный этап
-
-# Steam:
-
-## общая инфа
-
-appid
-тип - игра/приложение/dlc/soundtrack
-
-demoid (nullable) (сами демки нет смысла парсить)
-dlcforappid (nullable) (для dlc обязательно)
-optionaldlc (nullable / bool)
-requiredappid (nullable) (какой appid нужно владеть чтобы была возможность купить этот (для dlc что логично - заполняем))
-
-билд для линукса?
-билд для винды?
-билд для мака?
-
-vac включен?
-
-название игры на метакритике
-рейтинг критиков на меткритике
-ссылка на метакритик
-
-лучше играть на геймпаде? (Gamepad Preferred)
-все части игры поддерживают геймпад? - none/partial/full (Full Controller Support / "controller_support")
-
-дата выхода (в том числе если еще не вышла - в будущем) (для диапазона - минимально допустимое время и дата)
-крайняя дата выхода (для еще не вышедших конвертируем стимовское "q3", "в сентябре" и тп в нормальные диапазоны)
-состояние: не вышла, вышла для предзаказавших, в раннем доступе, вышла, снята с продаж
-
-уведомление о внешнем аккаунте (текст исключительно на англ)
-уведомление о внешнем drm/античите (текст исключительно на англ)
-
-## медиа
-
-appid
-type (скриншот, трейлер, Header Capsule, Small Capsule, Main Capsule, Vertical Capsule, Page Background, Library Capsule, Library Header, Library Hero, Library Logo)
-url
-format (тип файла) (индексируем премущественно webm для видео)
-язык BCP 47
-
-## приложение <-> издание
-
-appid
-packedgeid
-
-## инфа о изданиях
-
-packedgeid
-название издания (на англ исключительно - уже нормализированный от цены)
-описание издания
-
-## цены изданий
-
-packedgeid
-
-валюта (steam price region)
-
-* если цены null - не продается
-int цена (0 == постоянно бесплатно)
-int конечная цена
-% скидки
-
-тип (единоразово/регулярная)
-период (час/день/неделя/месяц/год)
-периодо-единиц (int) в подписке
-
-## наборы (бандлы)
-
-bundleid
-name
-стандартная скидка за бандл %
-must_purchase_as_set
-
-## набор <-> издание
-
-packadgeid
-bundleid
-
-## цены наборов
-
-bundleid
-валюта (steam price region)
-эффективная скидка
-базовая цена (int)
-финальная цена (int)
-
-## внешние ссылки
-
-appid
-тип (название соц.сети на англ в нижнем регистре без спец. символов + support_website и support_email (сюда же записываем))
-url
-value (можно внести вместо url)
-
-## возврастные ограничения (на английской локали, оно все равно покажет все)
-
-appid
-название стандарта (в том числе из поля content_descriptors представляем как steam)
-ageid (appid+стандарт)
-
-рейтинг оценен самим разрабом? ("rating_generated") (nullable / bool)
-показывать окно-предупреждение? ("use_age_gate") (nullable / bool)
-запрещен для продажи по данному рейтингу? (nullable / bool)
-
-рейтинг (текстовый дескриптор) (nullable)
-минимальный возвраст (nullable)
-дескриптор (raw) (nullable)
-
-* для nullable имеется ввиду в случаях content_descriptors и редких таких как bbfc который дает только поле "рейтинг"
-
-## дескрипторы (парсим raw)
-
-ageid
-steamid (для content_descriptors источника / nullable)
-name (display_online_notice как отдельное поле не сохраняем а превращаем в дескриптор с заранее определенным английским текстом)
-
-## системные требования
-
-appid
-платформа
-уровень (минимальные / рекомендованные)
-html (на этом этапе парсинг содержимого не предполагается) ВАЖНО - используем АНГЛИЙСКИЙ текст (полученный с англ страницы)
-
-## "фичи" игры
-
-appid
-id категории (smallint)
-english name
-
-## функции доступности
-
-appid
-id категории (smallint)
-english name
-
-## поддержка стимдек
-
-appid
-steamdeck статус - неизвестно / неподдерживается / играбельно / поддерживается
-TODO - доп поля детализации
-
-## eula сторонние
-
-appid
-id
-имя-описание (вроде бы единое поле? TODO)
-steam-link support (являеться отдельным полем? TODO)
-url
-version
-
-## контроллеры
-
-контроллер (xbox, дуалшок, дуалсенс и тп на англ, пробелы и регистры допустимы)
-поддержка bt?
-поддержка usb?
-
-## разработчики и издатели
-
-appid
-статус (разраб/издатель)
-id организации
-
-## общая инфа-языки
-
-appid
-язык BCP 47
-
-название
-короткое описание
-об игре
-длинное описание
-legal-notice
-
-## поддерживаемые языки
-
-appid
-язык BCP 47
-
-озвучка?
-текст?
-субтитры?
-
-## билд-ветки
-
-название ветки
-время обновления
-описание ветки
-buildid
-размер для скачки
-размер на диске
-
-## отзывы-языки статистика
-
-appid
-язык BCP 47 (допустимо nullable при записи ALL)
-кол-во отзывов
-кол-во отрицательных
-кол-во положительных
-review-score (1-9)
-
-## отзывы по игре
-
-appid
-userid
-
-playtime_forever
-playtime_last_two_weeks
-playtime_at_review
-deck_playtime_at_review
-
-datetime_last_played
-datetime_created
-datetime_updated
-datetime_dev_responded
-
-votes_up
-votes_funny
-weighted_vote_score
-comment_count
-
-steam_purchase
-received_for_free
-written_during_early_access
-primarily_steam_deck
-
-voted_up (рекомендует ли игру)
-language (BCP 47)
-review_text
-developer_response
-
-## внешние отзывы указанные разрабом (только английские)
-
-appid
-организация
-оценка (raw, обычно это `x/y`, бывают без оценки)
-ссылка
-цитата
-
-## ачивки
-
-appid
-id
-урл картинки
-% полученных у игроков
-является скрытой?
-
-### ачивки-языки
-
-id ачивки
-язык BCP 47
-
-название
-описание
-
-### CCU (В ПЕРВОЙ ВЕРСИИ НЕ РЕАЛИЗОВЫВАТЬ!) - нужен собственный сборщик
-
-N минут считывать текущий CCU
-
-дальше выводим
-
-период - вчера/последние 7 полных суток/последние 30 полных суток/все время
-min
-max
-avg
-median
-
-# GamesVoice
-
-
-
-# Другие источники которые планируются:
-
-GamesVoice
-Mechanics VoiceOver
-GOG
-EGS
-XBox
-VKPlay
-PCGamingWiki
-IGDB
-WikiData
-areweanticheatyet.com / https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet/blob/master/games.json
-VNDB.org
-HLTB
-vaporlens.app
+# PrefTrace source mapping
+
+Это source-close mapping, а не объединённая модель и не entity resolution.
+Для Steam сохраняем нормализованные факты Steam в отдельных source-specific
+таблицах. `tz_contract.py` независимо проверяет физическую SQLite-схему.
+
+## Steam application
+
+`steam_apps`:
+
+```text
+app_id PK
+type, demo_id, dlc_for_app_id, optional_dlc, required_app_id
+linux_build, windows_build, mac_build, vac_enabled
+required_age nullable                 # raw/global Steam required age
+metacritic_score, metacritic_url
+gamepad_preferred nullable             # authoritative AppInfo: true/false
+controller_support nullable            # none/partial/full; NULL only if source unavailable
+release_date, release_date_max, release_status
+external_account_notice, drm_notice
+```
+
+`steam_app_localizations` stores `(app_id, language)` with `name`, short/about,
+long description and legal notice. Languages are BCP47.
+
+`steam_media` stores canonical media types (`screenshot`, `trailer`, `header_capsule`,
+`small_capsule`, `main_capsule`, `vertical_capsule`, `page_background`, library
+asset classes), URL, format and an explicit source language. Global media language
+is NULL. `capsule_184x69` is not Main Capsule.
+
+## Editions, prices and restrictions
+
+`steam_editions(package_id PK, name nullable, description nullable)` has no ETL
+`resolved` flag. Missing public package metadata remains NULL and is visible in
+refresh/diagnostic state.
+
+`steam_app_editions(app_id, package_id)` is the app-to-package relation.
+
+`steam_edition_prices` has:
+
+```text
+package_id, price_region PK
+currency nullable
+initial, final, discount_percent
+discount_description nullable, discount_end_at nullable
+price_type, period, period_units
+```
+
+`steam_bundle_prices` is analogous with `(bundle_id, price_region)` as its PK.
+Currency is not a region. A missing price row is not a country restriction.
+
+`steam_bundles(bundle_id PK, name, discount_percent, must_purchase_as_set)` keeps
+static bundle configuration. `steam_bundle_prices.effective_discount_percent` is
+the current effective saving derived from the purchase option's initial/final
+prices, not a copy of the static field. Current memberships are stored in
+`steam_bundle_editions(bundle_id, package_id)`.
+
+`steam_package_country_restrictions(package_id, restriction_type, country_code)`
+stores only explicit Steam/package restrictions with normalized ISO country codes.
+It does not infer restrictions from price availability or store country.
+
+StoreBrowse package prices use `original_price_in_cents -> initial`,
+`final_price_in_cents -> final`, and `discount_pct -> discount_percent`.
+`initial_price_in_cents` is not a source field for this mapping. A non-zero source
+discount never fabricates `initial=final`. Filled initial/final/discount values
+are validated and inconsistent values produce a diagnostic.
+
+## Ratings and descriptors
+
+`steam_age_ratings` stores `(age_id PK, app_id, standard, rating_generated,
+use_age_gate, banned, rating, minimum_age, descriptor_raw)`. `minimum_age` is
+authority-specific: use source `required_age` first, then only unambiguous
+authority mappings (for example PEGI 7 -> 7). Do not copy app required age into
+every authority.
+
+`steam_descriptors` stores normalized fragments, preserving `steam_id` where the
+source supplies one. `descriptor_raw` remains lossless in the rating row.
+Official Steam names such as `Frequent Violence or Gore` are passed through the
+same multilingual normalizer and may produce `frequent violence` and `gore`.
+Normalization preserves separators, removes only title boilerplate and metadata
+fragments, keeps negations, and uses `simplemma` plus `stopwordsiso` when
+available. It never discards a whole block because one line is metadata.
+
+## Steam capabilities
+
+`steam_features` and `steam_accessibility_features` store category IDs and English
+registry names. Unknown IDs remain with NULL names and a diagnostic.
+`steam_deck_support(app_id PK, status)` uses unknown/unsupported/playable/supported.
+`steam_eulas`, `steam_external_links`, `steam_external_reviews` keep source facts.
+
+`steam_controllers(app_id, controller PK, bluetooth nullable, usb nullable)` has no
+`support` column: a row itself means Steam reported the controller/configuration.
+Unknown transport remains NULL.
+
+## Organizations
+
+`steam_organizations(creator_clan_account_id PK, slug, name, homepage,
+follower_count, logo_url, background_url)` is the canonical Steam creator entity
+when the public source supplies the identity.
+
+`steam_organization_credits(app_id, status, creator_clan_account_id nullable,
+credited_name)` keeps the source display string independently. Minimum roles are
+`developer` and `publisher`; no fuzzy cross-source resolution is performed.
+
+## Languages, tags and genres
+
+`steam_supported_languages(app_id, language PK)` stores nullable `audio`, `text`
+and `subtitles`; structured AppInfo false is known false, weak-source unknown is
+NULL. `steam_review_language_stats` uses RFC 4647 BCP47 language codes and the
+literal `*` for ALL languages; ALL is not nullable.
+
+`steam_tags(app_id, tag_id PK, weight nullable)` and
+`steam_tag_localizations(tag_id, language PK, name)` store Steam tag IDs, weights
+and localized names. `steam_genres(app_id, genre_id PK)` and
+`steam_genre_localizations(genre_id, language PK, name)` do the same for genres.
+Tags and genres are distinct relations; English is an ordinary `en` localization.
+
+## Depots and branches
+
+`steam_depots(depot_id PK, name, language, architecture, low_violence,
+dlc_app_id, optional_dlc_app_id, depot_from_app, shared_install, system_defined)`
+stores source depot facts. `steam_app_depots(app_id, depot_id)` is a separate
+relation because shared depots can be used by another app. `steam_depot_os` stores
+one `(depot_id, os)` row per `oslist` value; missing restrictions are not expanded
+to every known OS. `steam_depot_manifests(depot_id, branch, manifest_id,
+download_size nullable, disk_size nullable)` stores depot-level public metadata,
+not file/chunk contents.
+
+`steam_build_branches(app_id, name PK, updated_at, description, build_id)` keeps
+derived min/median/max download and disk sizes. A profile with an unknown depot
+download (or disk) is excluded from that metric independently; unknown values are
+never added as zero. Valid shared depots participate in base install profiles;
+DLC-gated depots do not.
+
+## Workshop, reviews and achievements
+
+`steam_workshop_stats(app_id PK, workshop_available, published_file_count,
+collection_count)` is filled only from anonymous/public AppInfo/pages. If totals
+are unavailable anonymously they remain NULL with a diagnostic.
+
+`steam_reviews` stores the selected review sample and its stable
+`recommendation_id`, author/playtime/vote fields, `datetime_dev_responded`,
+response text and language. Sampling is intentional: the pipeline stores the
+configured positive/negative sample, not all reviews. `steam_achievements` and
+`steam_achievement_localizations` use the structured Web API schema path;
+percentages are optional enrichment.
+
+## Common invariants
+
+Empty strings normalize to NULL. Boolean NULL means unknown, false means known
+negative. Numeric zero remains a real zero. Refresh replacement is current-state
+replacement: `(source, app_id, scope, code)` diagnostics are upserted, so repeated
+identical refreshes do not duplicate them. Shared packages/bundles are garbage
+collected only after all app references are checked.
+
+Wikidata and other non-Steam sources remain deprecated and are outside this
+Steam mapping iteration.

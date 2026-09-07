@@ -156,10 +156,12 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
             assert (await session.scalars(select(SteamMedia))).all()
             assert await session.get(SteamEdition, 10)
             assert await session.get(SteamAppEdition, (42, 10))
-            assert await session.get(SteamEditionPrice, (10, "USD"))
+            edition_price = await session.get(SteamEditionPrice, (10, "KZ"))
+            assert edition_price and edition_price.currency == "USD"
             assert await session.get(SteamBundle, 20)
             assert await session.get(SteamBundleEdition, (20, 10))
-            assert await session.get(SteamBundlePrice, (20, "USD"))
+            bundle_price = await session.get(SteamBundlePrice, (20, "KZ"))
+            assert bundle_price and bundle_price.currency == "USD"
             assert (await session.scalars(select(SteamFeature))).all()
             assert (await session.scalars(select(SteamAgeRating))).all()
             assert (await session.scalars(select(SteamDescriptor))).all()

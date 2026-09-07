@@ -1,0 +1,246 @@
+{
+  "control_app_ids": [
+    {"case": "vac_category_8", "app_id": 730},
+    {"case": "gamepad_preferred_60", "app_id": 1259420},
+    {"case": "partial_controller_18", "app_id": 292030},
+    {"case": "full_controller_28", "app_id": 236390},
+    {"case": "dualshock_usb_bluetooth", "app_id": 1030300},
+    {"case": "dualsense_usb_bluetooth", "app_id": 1091500},
+    {"case": "accessibility", "app_id": 1091500},
+    {"case": "eula", "app_id": 1091500},
+    {"case": "dlc_for_app_id", "app_id": 2138330},
+    {"case": "required_app_id", "app_id": 601360},
+    {"case": "demo_relation", "app_id": 418370},
+    {"case": "soundtrack", "app_id": 1092840},
+    {"case": "social_links", "app_id": 1091500},
+    {"case": "achievements", "app_id": 1091500},
+    {"case": "media_assets_and_webm", "app_id": 1091500}
+    ,{"case": "price_regression_442913", "app_id": 442913}
+    ,{"case": "rimworld_alpha4_shared_depot", "app_id": 294100}
+  ],
+  "controls": [
+    {
+      "name": "vac_category_8",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 8}]},
+      "expected": {"vac_enabled": true}
+    },
+    {
+      "name": "gamepad_preferred_60",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 60}]},
+      "expected": {"gamepad_preferred": true}
+    },
+    {
+      "name": "partial_controller_18",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 18}], "controller_support": "Partial Controller Support"},
+      "expected": {"controller_support": "partial"}
+    },
+    {
+      "name": "full_controller_28",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 28}], "controller_support": "Full Controller Support"},
+      "expected": {"controller_support": "full"}
+    },
+    {
+      "name": "dualshock_usb_bluetooth",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 55}, {"id": 56}]},
+      "expected": {"controller": {"name": "DualShock 4", "usb": true, "bluetooth": true}}
+    },
+    {
+      "name": "dualsense_usb_bluetooth",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 57}, {"id": 58}]},
+      "expected": {"controller": {"name": "DualSense", "usb": true, "bluetooth": true}}
+    },
+    {
+      "name": "accessibility",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 64}, {"id": 65}]},
+      "expected": {"accessibility_ids": [64, 65]}
+    },
+    {
+      "name": "eula",
+      "kind": "details",
+      "raw": {"type": "Game", "eulas": [{"id": "eula-1", "url": "https://example/eula"}]},
+      "expected": {"eula_url": "https://example/eula"}
+    },
+    {
+      "name": "dlc_for_app_id",
+      "kind": "details",
+      "raw": {"type": "DLC", "dlcforappid": 10},
+      "expected": {"type": "dlc", "dlc_for_app_id": 10}
+    },
+    {
+      "name": "optional_dlc",
+      "kind": "details",
+      "raw": {"type": "DLC", "optionaldlc": 1},
+      "expected": {"optional_dlc": true}
+    },
+    {
+      "name": "required_app_id",
+      "kind": "details",
+      "raw": {"type": "DLC", "requiredappid": 10},
+      "expected": {"required_app_id": 10}
+    },
+    {
+      "name": "demo_relation",
+      "kind": "details",
+      "raw": {"type": "Game", "demos": [{"appid": 123}]},
+      "expected": {"type": "game", "demo_id": 123}
+    },
+    {
+      "name": "soundtrack",
+      "kind": "details",
+      "raw": {"type": "Music"},
+      "expected": {"type": "soundtrack"}
+    },
+    {
+      "name": "application",
+      "kind": "details",
+      "raw": {"type": "Software"},
+      "expected": {"type": "application"}
+    },
+    {
+      "name": "upcoming",
+      "kind": "details",
+      "raw": {"type": "Game", "release_date": {"coming_soon": true}},
+      "expected": {"release_status": "not_released"}
+    },
+    {
+      "name": "early_access",
+      "kind": "details",
+      "raw": {"type": "Game", "is_early_access": true},
+      "expected": {"release_status": "early_access"}
+    },
+    {
+      "name": "advanced_access",
+      "kind": "details",
+      "raw": {"type": "Game", "release_state": "advanced_access"},
+      "expected": {"release_status": "advanced_access"}
+    },
+    {
+      "name": "drm_notice",
+      "kind": "details",
+      "raw": {"type": "Game", "drm_notice": "Third-party DRM"},
+      "expected": {"drm_notice": "Third-party DRM"}
+    },
+    {
+      "name": "external_account_notice",
+      "kind": "details",
+      "raw": {"type": "Game", "ext_user_account_notice": "Requires an account"},
+      "expected": {"external_account_notice": "Requires an account"}
+    },
+    {
+      "name": "social_links",
+      "kind": "links",
+      "raw": {
+        "website": "https://example.com",
+        "support_info": {"url": "https://support.example", "email": "help@example.com"},
+        "links": [
+          {"link_type": 1, "url": "https://youtube.com/example"},
+          {"link_type": 3, "url": "https://x.com/example"},
+          {"link_type": 5, "url": "https://discord.gg/example"},
+          {"type": "VK", "url": "https://vk.com/example"}
+        ]
+      },
+      "expected": {
+        "types": ["website", "support_website", "support_email", "youtube", "twitter", "discord", "vk"]
+      }
+    },
+    {
+      "name": "achievements",
+      "kind": "achievements",
+      "source_files": {
+        "schema": "../tests/fixtures/steam/achievement_schema_en.json",
+        "percentages": "../tests/fixtures/steam/achievement_percentages.json"
+      },
+      "expected": {"ids": ["ACH_FIRST_STEP", "ACH_SECRET"], "percentages": [73.5, 4.25]}
+    },
+    {
+      "name": "media_assets_and_webm",
+      "kind": "media",
+      "raw": {
+        "header_image": "https://cdn.example/header.jpg",
+        "capsule_image": "https://cdn.example/capsule_231x87.jpg",
+        "capsule_imagev5": "https://cdn.example/capsule_184x69.jpg",
+        "capsule_imagev6": "https://cdn.example/capsule_616x353.jpg",
+        "background_raw": "https://cdn.example/background.jpg",
+        "movies": [{"id": 2, "webm": {"max": "https://cdn.example/trailer.webm"}, "hls_h264": "https://cdn.example/trailer.m3u8"}]
+      },
+      "expected": {"types": ["header_capsule", "small_capsule", "main_capsule", "page_background", "trailer"], "trailer_format": "webm", "main_capsule_count": 1}
+    },
+    {
+      "name": "bundle_membership",
+      "kind": "bundle",
+      "raw": {
+        "response": {"store_items": [{"id": 100, "included_items": {"included_packages": [{"best_purchase_option": {"packageid": 10}}, {"best_purchase_option": {"packageid": 11}}]}}]}
+      },
+      "expected": {"bundle_id": 100, "package_ids": [10, 11]}
+    },
+    {
+      "name": "pegi_minimum_age",
+      "kind": "details",
+      "raw": {"type": "Game", "ratings": {"pegi": {"rating": "7"}}},
+      "expected": {"rating_minimum_age": 7}
+    },
+    {
+      "name": "gamepad_absent_is_false",
+      "kind": "appinfo",
+      "raw": {"category": [{"id": 2}]},
+      "expected": {"gamepad_preferred": false, "controller_support": "none"}
+    },
+    {
+      "name": "steam_descriptor_normalizes_official_name",
+      "kind": "descriptor",
+      "raw": {"ids": [2]},
+      "expected": {"names": ["frequent violence", "gore"]}
+    },
+    {
+      "name": "price_parser_uses_original_price",
+      "kind": "price",
+      "raw": {"purchase_options": [{"packageid": 442913, "price_region": "USD_LATAM", "currency": "USD", "original_price_in_cents": 320000, "final_price_in_cents": 128000, "discount_pct": 60}]},
+      "expected": {"package_id": 442913, "price_region": "USD_LATAM", "initial": 320000, "final": 128000, "discount_percent": 60}
+    },
+    {
+      "name": "unknown_depot_download_not_zero",
+      "kind": "depot",
+      "raw": {"depots": {"123": {"depotfromapp": 999, "manifests": {"alpha4": {"size": 1000}}}, "branches": {"alpha4": {"buildid": "1"}}}},
+      "expected": {"branch": "alpha4", "download_size_min": null}
+    },
+    {
+      "name": "tag_weight_and_localization",
+      "kind": "tag",
+      "raw": {"tags": [{"tag_id": 1, "name": "Action", "weight": 42}]},
+      "expected": {"tag_id": 1, "weight": 42, "language": "en", "name": "Action"}
+    },
+    {
+      "name": "genre_localization",
+      "kind": "genre",
+      "raw": {"genres": [{"id": 1, "description": "Action"}]},
+      "expected": {"genre_id": 1, "language": "en", "name": "Action"}
+    },
+    {
+      "name": "creator_identity_and_credit",
+      "kind": "organization",
+      "raw": {"developers": [{"name": "Foo Studios", "creator_clan_account_id": 12345}]},
+      "expected": {"credit": {"status": "developer", "creator_clan_account_id": 12345, "credited_name": "Foo Studios"}}
+    },
+    {
+      "name": "explicit_country_restriction",
+      "kind": "restriction",
+      "raw": {"package_groups": [{"subs": [{"packageid": 99, "country_restrictions": [{"country_code": "ru", "type": "purchase"}]}]}]},
+      "expected": {"restriction": {"package_id": 99, "restriction_type": "purchase", "country_code": "RU"}}
+    },
+    {
+      "name": "anonymous_workshop_totals",
+      "kind": "workshop",
+      "raw": {"common": {"category": {"category_30": "1"}}},
+      "html": "\\\"workshopNumbers\\\":{\\\"total\\\":12}",
+      "collection_html": "\\\"workshopNumbers\\\":{\\\"total\\\":3}",
+      "expected": {"workshop_available": true, "published_file_count": 12, "collection_count": 3}
+    }
+  ]
+}

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from scraper.steam.client import SteamClient, SteamClientError
 from scraper.steam.locales import (
@@ -24,14 +24,20 @@ from scraper.steam.parsers import (
     parse_appinfo_semantics,
     parse_build_branches,
     parse_bundle_membership,
+    parse_depots,
     parse_eulas,
     parse_external_links,
     parse_external_reviews,
     parse_global_achievement_percentages,
+    parse_html_creator_entities,
+    parse_html_structured_tags,
     parse_language_table,
     parse_package_metadata,
     parse_store_browse_item,
+    parse_structured_genres,
+    parse_structured_tags,
     parse_tags,
+    parse_workshop_stats,
 )
 from scraper.steam.reviews import _collect_reviews, _fetch_summary
 from scraper.steam.storage import (
@@ -143,9 +149,7 @@ class SteamGameSyncService(CachedSourceService):
                             loader_kwargs: dict[str, Any] = {"store_country": country}
                             if bundle_id is not None:
                                 loader_kwargs["bundle_id"] = bundle_id
-                            browse_cache[cache_key] = await loader(
-                                app_id, locale, **loader_kwargs
-                            )
+                            browse_cache[cache_key] = await loader(app_id, locale, **loader_kwargs)
                         except (SteamClientError, httpx.HTTPError, TypeError):
                             browse_cache[cache_key] = {}
                     return browse_cache[cache_key]
@@ -169,9 +173,7 @@ class SteamGameSyncService(CachedSourceService):
                 enriched["_bundle_memberships"] = memberships
                 return enriched
 
-            async def get_package_metadata(
-                package_ids: set[int], locale: LocaleInfo
-            ) -> list[Any]:
+            async def get_package_metadata(package_ids: set[int], locale: LocaleInfo) -> list[Any]:
                 if not package_ids:
                     return []
                 cache_key = f"{locale.steam_language}:{country or 'US'}"
@@ -358,6 +360,27 @@ class SteamGameSyncService(CachedSourceService):
                     )
                     browse = await get_store_browse(locale)
                     browse_data = parse_store_browse_item(browse)
+                    workshop_html = collection_html = None
+                    workshop_loader = getattr(steam, "workshop_page", None)
+                    if workshop_loader is not None:
+                        try:
+                            workshop_html = await workshop_loader(app_id)
+                        except (SteamClientError, httpx.HTTPError, TypeError):
+                            workshop_html = None
+                        try:
+                            collection_html = await workshop_loader(app_id, section="collections")
+                        except (SteamClientError, httpx.HTTPError, TypeError):
+                            collection_html = None
+                    tags, tag_localizations = parse_structured_tags(
+                        common, language=locale.requested
+                    )
+                    if not tags:
+                        tags, tag_localizations = parse_html_structured_tags(
+                            metadata_html, language=locale.requested
+                        )
+                    genres, genre_localizations = parse_structured_genres(
+                        common, language=locale.requested
+                    )
                     supported_languages = (
                         structured_languages
                         or browse_data.get("supported_languages")
@@ -374,8 +397,7 @@ class SteamGameSyncService(CachedSourceService):
                             {
                                 "code": "unknown_steam_language",
                                 "message": (
-                                    "Steam language was not mapped to BCP47: "
-                                    f"raw={raw_language!r}"
+                                    f"Steam language was not mapped to BCP47: raw={raw_language!r}"
                                 ),
                             }
                         )
@@ -386,10 +408,32 @@ class SteamGameSyncService(CachedSourceService):
                         }
                         for category_id in semantics.get("unknown_category_ids", [])
                     )
+                    diagnostics.extend(browse_data.get("price_diagnostics", []))
+                    workshop = parse_workshop_stats(
+                        common,
+                        workshop_html,
+                        collection_html=collection_html,
+                        app_id=app_id,
+                    )
+                    if workshop.workshop_available and (
+                        workshop.published_file_count is None or workshop.collection_count is None
+                    ):
+                        diagnostics.append(
+                            {
+                                "code": "steam_workshop_totals_unavailable",
+                                "message": "Anonymous Workshop page did not expose complete totals",
+                            }
+                        )
                     return {
                         "supported_languages": supported_languages,
                         "diagnostics": diagnostics,
                         "tags": parse_tags(html),
+                        "structured_tags": tags,
+                        "tag_localizations": tag_localizations,
+                        "genre_rows": genres,
+                        "genre_localizations": genre_localizations,
+                        "workshop_stats": workshop,
+                        "organization_entities": parse_html_creator_entities(metadata_html),
                         "external_links": parse_external_links({}, metadata_html)
                         + list(browse_data.get("external_links", [])),
                         "external_reviews": parse_external_reviews({}, metadata_html),
@@ -464,6 +508,7 @@ class SteamGameSyncService(CachedSourceService):
                         )
                     )
                 elif locale is locales[0]:
+
                     async def blocked_achievement_loader() -> object:
                         return {
                             "achievements": [],
@@ -558,7 +603,7 @@ class SteamGameSyncService(CachedSourceService):
 
             async def branches_loader() -> object:
                 payload = await get_app_info()
-                return {"branches": parse_build_branches(payload)}
+                return {"branches": parse_build_branches(payload), **parse_depots(payload)}
 
             operations.append(
                 self._refresh_scope(
@@ -613,9 +658,7 @@ class SteamGameSyncService(CachedSourceService):
             ).all()
             organizations = (
                 await session.scalars(
-                    select(SteamOrganizationCredit).where(
-                        SteamOrganizationCredit.app_id == app_id
-                    )
+                    select(SteamOrganizationCredit).where(SteamOrganizationCredit.app_id == app_id)
                 )
             ).all()
 
@@ -624,9 +667,9 @@ class SteamGameSyncService(CachedSourceService):
         publishers: list[str] = []
         for organization in organizations:
             if organization.status == "developer":
-                _append_unique(developers, organization.organization_name)
+                _append_unique(developers, organization.credited_name)
             elif organization.status == "publisher":
-                _append_unique(publishers, organization.organization_name)
+                _append_unique(publishers, organization.credited_name)
         return title, developers, publishers
 
     async def _persist(
@@ -664,6 +707,13 @@ class SteamGameSyncService(CachedSourceService):
                     await remove_steam_scope(session, app_id, scope, data)
                     await persist_steam_scope(session, app_id, scope, data)
                     state.refreshed_at = observed_at
+                await session.execute(
+                    delete(SourceDiagnostic).where(
+                        SourceDiagnostic.source == self.source,
+                        SourceDiagnostic.steam_app_id == app_id,
+                        SourceDiagnostic.scope == scope,
+                    )
+                )
                 if error:
                     session.add(
                         SourceDiagnostic(

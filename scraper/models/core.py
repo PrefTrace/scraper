@@ -101,13 +101,16 @@ class EditionInfo(Model):
 
 class EditionPrice(Model):
     package_id: int
+    price_region: str | None = None
+    currency: str | None = None
     initial: int | None = None
     final: int | None = None
     discount_percent: int | None = None
+    discount_description: str | None = None
+    discount_end_at: datetime | None = None
     price_type: str = "one_time"
     period: str | None = None
     period_units: int | None = None
-    currency: str | None = None
 
 
 class Bundle(Model):
@@ -120,10 +123,13 @@ class Bundle(Model):
 
 class BundlePrice(Model):
     bundle_id: int
+    price_region: str | None = None
+    currency: str | None = None
     effective_discount_percent: int | None = None
     initial: int | None = None
     final: int | None = None
-    currency: str | None = None
+    discount_description: str | None = None
+    discount_end_at: datetime | None = None
 
     @property
     def discount_percent(self) -> int | None:
@@ -166,14 +172,18 @@ class ThirdPartyEula(Model):
 
 class Controller(Model):
     name: str
-    support: bool | None = None
     bluetooth: bool | None = None
     usb: bool | None = None
 
 
 class OrganizationCredit(Model):
-    name: str
     status: str
+    creator_clan_account_id: int | None = None
+    credited_name: str
+
+    @property
+    def name(self) -> str:
+        return self.credited_name
 
 
 class BuildBranch(Model):
@@ -187,6 +197,40 @@ class BuildBranch(Model):
     disk_size_min: int | None = None
     disk_size_median: int | None = None
     disk_size_max: int | None = None
+
+
+class Depot(Model):
+    depot_id: int
+    name: str | None = None
+    language: str | None = None
+    architecture: str | None = None
+    low_violence: bool | None = None
+    dlc_app_id: int | None = None
+    optional_dlc_app_id: int | None = None
+    depot_from_app: int | None = None
+    shared_install: bool | None = None
+    system_defined: bool | None = None
+
+
+class DepotManifest(Model):
+    depot_id: int
+    branch: str
+    manifest_id: str | None = None
+    download_size: int | None = None
+    disk_size: int | None = None
+
+
+class PackageCountryRestriction(Model):
+    package_id: int
+    restriction_type: str
+    country_code: str
+
+
+class WorkshopStats(Model):
+    app_id: int
+    workshop_available: bool | None = None
+    published_file_count: int | None = None
+    collection_count: int | None = None
 
 
 class ReviewLanguageStats(Model):
@@ -211,22 +255,45 @@ class Category(Model):
 
 
 class Tag(Model):
-    name: str
-    source: str
+    tag_id: int | None = None
+    weight: int | None = None
+    # Compatibility fields for the legacy HTML-only helper.  TZ persistence
+    # uses tag_id/weight and tag localizations separately.
+    name: str | None = None
+    source: str | None = None
     rank: int | None = None
-    votes: int | None = None
+
+
+class TagLocalization(Model):
+    tag_id: int
+    language: str
+    name: str
+
+
+class Genre(Model):
+    genre_id: int
+
+
+class GenreLocalization(Model):
+    genre_id: int
+    language: str
+    name: str
 
 
 class AgeRating(Model):
     authority: str
     rating: str | None = None
-    required_age: int | None = None
+    minimum_age: int | None = None
     descriptors: list[str] = Field(default_factory=list)
     banned: bool | None = None
     use_age_gate: bool | None = None
     rating_generated: bool | None = None
     raw: str | None = None
     age_id: str | None = None
+
+    @property
+    def required_age(self) -> int | None:
+        return self.minimum_age
 
 
 class RatingSummary(Model):
