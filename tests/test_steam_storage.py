@@ -105,9 +105,14 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
                         "final_price_in_cents": 900,
                     }
                 ],
-                "_bundle_memberships": {20: [10]},
+                "_bundle_memberships": {20: [10, 11]},
             },
         )
+        async with database.session() as session:
+            session.add(SteamEdition(package_id=11))
+            session.add(SteamEditionPrice(package_id=11, price_region="KZ"))
+            await session.commit()
+
         async with database.session() as session:
             await persist_steam_scope(session, 42, "details:en-US:kz", parsed)
             await persist_steam_scope(
@@ -154,8 +159,10 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
             assert await session.get(SteamAppEdition, (42, 10))
             edition_price = await session.get(SteamEditionPrice, (10, "KZ"))
             assert edition_price and edition_price.currency == "USD"
+            assert await session.get(SteamEditionPrice, (11, "KZ")) is None
             assert await session.get(SteamBundle, 20)
             assert await session.get(SteamBundleEdition, (20, 10))
+            assert await session.get(SteamBundleEdition, (20, 11))
             bundle_price = await session.get(SteamBundlePrice, (20, "KZ"))
             assert bundle_price and bundle_price.currency == "USD"
             assert (await session.scalars(select(SteamFeature))).all()

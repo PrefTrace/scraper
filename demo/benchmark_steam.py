@@ -969,16 +969,17 @@ def _real_integration_controls(connection: sqlite3.Connection) -> dict[str, Any]
         ).fetchone()[0]
     )
     add("workshop_collection_not_copied", workshop_copies == 0, {"copied_rows": workshop_copies})
-    no_price_rows = connection.execute(
+    fabricated_bundle_price_rows = connection.execute(
         "SELECT be.bundle_id, be.package_id, p.price_region, p.initial, p.final "
         "FROM steam_bundle_editions be JOIN steam_edition_prices p "
-        "ON p.package_id=be.package_id AND p.price_region='KZ' "
-        "WHERE p.initial IS NULL AND p.final IS NULL LIMIT 10"
+        "ON p.package_id=be.package_id "
+        "LEFT JOIN steam_app_editions ae ON ae.package_id=be.package_id "
+        "WHERE ae.package_id IS NULL LIMIT 10"
     ).fetchall()
     add(
-        "real_bundle_package_unavailable_price_observation",
-        bool(no_price_rows),
-        {"rows": [list(row) for row in no_price_rows]},
+        "bundle_only_packages_do_not_get_edition_prices",
+        not fabricated_bundle_price_rows,
+        {"rows": [list(row) for row in fabricated_bundle_price_rows]},
     )
     depot_languages = [
         str(row[0])

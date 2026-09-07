@@ -648,30 +648,18 @@ async def _persist_details(
             for field_name, value in values.items():
                 setattr(price_row, field_name, value)
 
-    # A successful bundle response is also an authoritative observation of
-    # its included package topology.  If Steam supplied no standalone sale
-    # price for an included package in this observation region, retain the
-    # explicit unavailable observation instead of silently dropping it.  Do
-    # not overwrite a price discovered from a direct package offer.
-    bundle_regions: dict[int, set[str]] = {}
-    for item in _items(data.get("bundle_prices")):
-        bundle_id = _field(item, "bundle_id")
-        region = _price_region(item)
-        if bundle_id is not None and region:
-            bundle_regions.setdefault(int(bundle_id), set()).add(region)
-    for item in _items(data.get("bundles")):
-        bundle_id = _field(item, "bundle_id")
-        if bundle_id is None or int(bundle_id) not in authoritative_bundle_ids:
-            continue
-        for package_id in _field(item, "edition_package_ids", []) or []:
-            for region in bundle_regions.get(int(bundle_id), set()):
-                if await session.get(SteamEditionPrice, (int(package_id), region)) is None:
-                    session.add(
-                        SteamEditionPrice(
-                            package_id=int(package_id),
-                            price_region=region,
-                        )
-                    )
+    # Prices describe direct package offers only.  Remove rows left by older
+    # versions that incorrectly materialized a price observation for every
+    # package appearing in a bundle, even when the package has no direct app
+    # edition relation.
+    bundle_only_packages = select(SteamBundleEdition.package_id).where(
+        ~SteamBundleEdition.package_id.in_(select(SteamAppEdition.package_id))
+    )
+    await session.execute(
+        delete(SteamEditionPrice).where(
+            SteamEditionPrice.package_id.in_(bundle_only_packages)
+        )
+    )
 
     orphan_packages = select(SteamEdition.package_id).where(
         ~SteamEdition.package_id.in_(select(SteamAppEdition.package_id)),
