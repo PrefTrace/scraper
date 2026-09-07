@@ -14,9 +14,10 @@
     {"case": "soundtrack", "app_id": 1092840},
     {"case": "social_links", "app_id": 1091500},
     {"case": "achievements", "app_id": 1091500},
-    {"case": "media_assets_and_webm", "app_id": 1091500}
-    ,{"case": "price_regression_442913", "app_id": 442913}
-    ,{"case": "rimworld_alpha4_shared_depot", "app_id": 294100}
+    {"case": "media_assets_and_webm", "app_id": 1091500},
+    {"case": "price_regression_442913", "app_id": 442913},
+    {"case": "permanent_free_320246", "app_id": 236390},
+    {"case": "rimworld_alpha4_shared_depot", "app_id": 294100}
   ],
   "controls": [
     {
@@ -201,8 +202,14 @@
     {
       "name": "price_parser_uses_original_price",
       "kind": "price",
-      "raw": {"purchase_options": [{"packageid": 442913, "price_region": "USD_LATAM", "currency": "USD", "original_price_in_cents": 320000, "final_price_in_cents": 128000, "discount_pct": 60}]},
-      "expected": {"package_id": 442913, "price_region": "USD_LATAM", "initial": 320000, "final": 128000, "discount_percent": 60}
+      "raw": {"purchase_options": [{"packageid": 442913, "price_region": "USD_LATAM", "currency": "USD", "original_price_in_cents": 320000, "final_price_in_cents": 128000, "discount_pct": 60, "active_discounts": [{"discount_description": "#discount_desc_preset_special", "discount_end_date": 1800000000}]}]},
+      "expected": {"package_id": 442913, "price_region": "USD_LATAM", "initial": 320000, "final": 128000, "discount_percent": 60, "discount_type": "special", "discount_end_at_non_null": true}
+    },
+    {
+      "name": "permanent_free_package_observation",
+      "kind": "edition_price",
+      "raw": {"type": "Game", "package_groups": [{"subs": [{"packageid": 320246, "is_free_license": true, "price_in_cents_with_discount": 0, "percent_savings": 0}]}]},
+      "expected": {"package_id": 320246, "price_region": "US", "initial": 0, "final": 0, "discount_percent": null}
     },
     {
       "name": "unknown_depot_download_not_zero",
@@ -229,18 +236,12 @@
       "expected": {"credit": {"status": "developer", "creator_clan_account_id": 12345, "credited_name": "Foo Studios"}}
     },
     {
-      "name": "explicit_country_restriction",
-      "kind": "restriction",
-      "raw": {"package_groups": [{"subs": [{"packageid": 99, "country_restrictions": [{"country_code": "ru", "type": "purchase"}]}]}]},
-      "expected": {"restriction": {"package_id": 99, "restriction_type": "purchase", "country_code": "RU"}}
-    },
-    {
       "name": "anonymous_workshop_totals",
       "kind": "workshop",
       "raw": {"common": {"category": {"category_30": "1"}}},
       "html": "\\\"workshopNumbers\\\":{\\\"total\\\":12}",
       "collection_html": "\\\"workshopNumbers\\\":{\\\"total\\\":3}",
-      "expected": {"workshop_available": true, "published_file_count": 12, "collection_count": 3}
+      "expected": {"workshop_available": true, "published_file_count": 12, "collection_count": null}
     }
   ]
 }

@@ -108,7 +108,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         },
         technical={"id": _c("INTEGER")},
         primary_key=("id",),
-        unique_keys=(("app_id", "media_type", "url", "language"),),
+        unique_keys=(("app_id", "url", "language"),),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
         literals={
             "media_type": frozenset(
@@ -154,8 +154,10 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "initial": _c("INTEGER", True),
             "final": _c("INTEGER", True),
             "discount_percent": _c("INTEGER", True),
-            "discount_description": _c("TEXT", True),
+            "discount_type": _c("TEXT", True),
             "discount_end_at": _c("DATETIME", True),
+            "regional_edition": _c("BOOLEAN", True),
+            "run_region_restricted": _c("BOOLEAN", True),
             "price_type": _c("TEXT", True),
             "period": _c("TEXT", True),
             "period_units": _c("INTEGER", True),
@@ -203,7 +205,7 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
             "effective_discount_percent": _c("INTEGER", True),
             "initial": _c("INTEGER", True),
             "final": _c("INTEGER", True),
-            "discount_description": _c("TEXT", True),
+            "discount_type": _c("TEXT", True),
             "discount_end_at": _c("DATETIME", True),
         },
         technical={},
@@ -259,7 +261,6 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         domain={
             "app_id": _c("INTEGER"),
             "category_id": _c("INTEGER"),
-            "english_name": _c("TEXT", True),
         },
         technical={},
         primary_key=("app_id", "category_id"),
@@ -269,11 +270,15 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         domain={
             "app_id": _c("INTEGER"),
             "category_id": _c("INTEGER"),
-            "english_name": _c("TEXT", True),
         },
         technical={},
         primary_key=("app_id", "category_id"),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
+    ),
+    "steam_category_localizations": T(
+        domain={"category_id": _c("INTEGER"), "language": _c("TEXT"), "name": _c("TEXT")},
+        technical={},
+        primary_key=("category_id", "language"),
     ),
     "steam_deck_support": T(
         domain={"app_id": _c("INTEGER"), "status": _c("TEXT")},
@@ -363,16 +368,6 @@ STEAM_TZ_CONTRACT: dict[str, TableContract] = {
         technical={},
         primary_key=("app_id", "name"),
         foreign_keys=(_fk(("app_id",), "steam_apps", ("app_id",)),),
-    ),
-    "steam_package_country_restrictions": T(
-        domain={
-            "package_id": _c("INTEGER"),
-            "restriction_type": _c("TEXT"),
-            "country_code": _c("TEXT"),
-        },
-        technical={},
-        primary_key=("package_id", "restriction_type", "country_code"),
-        foreign_keys=(_fk(("package_id",), "steam_editions", ("package_id",)),),
     ),
     "steam_depots": T(
         domain={

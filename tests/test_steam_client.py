@@ -28,3 +28,22 @@ async def test_public_app_info_requires_no_publisher_key() -> None:
 
     assert payload["depots"]["branches"]["public"]["buildid"] == "7"
     assert "key" not in route.calls[0].request.url.params
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_public_category_registry_never_uses_a_web_api_key() -> None:
+    route = respx.get(
+        "https://api.steampowered.com/IStoreBrowseService/GetStoreCategories/v1/"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={"response": {"categories": [{"categoryid": 2, "display_name": "Single-player"}]}},
+        )
+    )
+
+    async with httpx.AsyncClient() as http:
+        registry = await SteamClient(http).category_registry(locale=normalize_locale("en-US"))
+
+    assert registry == {2: "Single-player"}
+    assert "key" not in route.calls[0].request.url.params

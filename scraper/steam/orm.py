@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -60,9 +61,7 @@ class SteamAppLocalization(Base):
 
 class SteamMedia(Base):
     __tablename__ = "steam_media"
-    __table_args__ = (
-        UniqueConstraint("app_id", "media_type", "url", "language", name="uq_steam_media"),
-    )
+    __table_args__ = (UniqueConstraint("app_id", "url", "language", name="uq_steam_media_asset"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     app_id: Mapped[int] = mapped_column(
@@ -95,6 +94,13 @@ class SteamAppEdition(Base):
 
 class SteamEditionPrice(Base):
     __tablename__ = "steam_edition_prices"
+    __table_args__ = (
+        CheckConstraint("TRIM(price_region) <> ''", name="ck_steam_edition_price_region"),
+        CheckConstraint(
+            "(initial IS NULL AND final IS NULL) OR final IS NOT NULL",
+            name="ck_steam_edition_price_observation",
+        ),
+    )
 
     package_id: Mapped[int] = mapped_column(
         ForeignKey("steam_editions.package_id", ondelete="CASCADE"), primary_key=True
@@ -104,8 +110,10 @@ class SteamEditionPrice(Base):
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    discount_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    discount_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     discount_end_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    regional_edition: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    run_region_restricted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     price_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     period: Mapped[str | None] = mapped_column(String(16), nullable=True)
     period_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -142,7 +150,7 @@ class SteamBundlePrice(Base):
     effective_discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     initial: Mapped[int | None] = mapped_column(Integer, nullable=True)
     final: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    discount_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    discount_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     discount_end_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
@@ -205,7 +213,6 @@ class SteamFeature(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     category_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
-    english_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SteamAccessibilityFeature(Base):
@@ -215,7 +222,14 @@ class SteamAccessibilityFeature(Base):
         ForeignKey("steam_apps.app_id", ondelete="CASCADE"), primary_key=True
     )
     category_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
-    english_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SteamCategoryLocalization(Base):
+    __tablename__ = "steam_category_localizations"
+
+    category_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    language: Mapped[str] = mapped_column(String(16), primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
 
 
 class SteamDeckSupport(Base):
@@ -299,16 +313,6 @@ class SteamSupportedLanguage(Base):
     audio: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     text: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     subtitles: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-
-
-class SteamPackageCountryRestriction(Base):
-    __tablename__ = "steam_package_country_restrictions"
-
-    package_id: Mapped[int] = mapped_column(
-        ForeignKey("steam_editions.package_id", ondelete="CASCADE"), primary_key=True
-    )
-    restriction_type: Mapped[str] = mapped_column(String(32), primary_key=True)
-    country_code: Mapped[str] = mapped_column(String(2), primary_key=True)
 
 
 class SteamDepot(Base):
@@ -546,7 +550,7 @@ __all__ = [
     "SteamMedia",
     "SteamOrganization",
     "SteamOrganizationCredit",
-    "SteamPackageCountryRestriction",
+    "SteamCategoryLocalization",
     "SteamReviewLanguageStat",
     "SteamReview",
     "SteamSupportedLanguage",

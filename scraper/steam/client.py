@@ -12,7 +12,7 @@ class SteamClientError(RuntimeError):
     pass
 
 
-_CATEGORY_REGISTRY: dict[int, str] | None = None
+_CATEGORY_REGISTRIES: dict[str, dict[int, str]] = {}
 _CATEGORY_REGISTRY_LOCK = asyncio.Lock()
 
 
@@ -140,21 +140,22 @@ class SteamClient:
             )
         return payload
 
-    async def category_registry(self, *, api_key: str | None = None) -> dict[int, str]:
-        """Load and process-cache Steam's English category definitions."""
+    async def category_registry(
+        self,
+        *,
+        locale: LocaleInfo | None = None,
+    ) -> dict[int, str]:
+        """Load a localized Steam category registry keyed by category ID."""
 
-        global _CATEGORY_REGISTRY
-        if _CATEGORY_REGISTRY is not None:
-            return dict(_CATEGORY_REGISTRY)
+        language = (locale.steam_language if locale is not None else "english").casefold()
+        if language in _CATEGORY_REGISTRIES:
+            return dict(_CATEGORY_REGISTRIES[language])
         async with _CATEGORY_REGISTRY_LOCK:
-            if _CATEGORY_REGISTRY is not None:
-                return dict(_CATEGORY_REGISTRY)
-            params: dict[str, Any] = {"language": "english"}
-            if api_key:
-                params["key"] = api_key
+            if language in _CATEGORY_REGISTRIES:
+                return dict(_CATEGORY_REGISTRIES[language])
             response = await self._get(
                 "https://api.steampowered.com/IStoreBrowseService/GetStoreCategories/v1/",
-                params=params,
+                params={"language": language},
             )
             payload = response.json()
             response_data = payload.get("response") if isinstance(payload, dict) else None
@@ -179,7 +180,7 @@ class SteamClient:
                     continue
                 if isinstance(name, str) and name.strip():
                     registry[category_id] = name.strip()
-            _CATEGORY_REGISTRY = registry
+            _CATEGORY_REGISTRIES[language] = registry
             return dict(registry)
 
     async def store_app_list_page(
@@ -288,6 +289,8 @@ class SteamClient:
                 "include_screenshots": True,
                 "include_trailers": True,
                 "include_basic_info": True,
+                # Steam's supported StoreBrowse switch for structured tags.
+                "include_tag_count": True,
                 "include_supported_languages": True,
                 "include_included_items": True,
                 "include_links": True,
@@ -301,6 +304,14 @@ class SteamClient:
         if not isinstance(payload, dict):
             raise SteamClientError(f"Unexpected Steam StoreBrowse response for app {app_id}")
         return payload
+
+    async def creator_home(self, creator_clan_account_id: int) -> str:
+        """Fetch a public Creator Home page for one known clan identity."""
+
+        response = await self._get(
+            f"https://store.steampowered.com/curator/{creator_clan_account_id}/"
+        )
+        return response.text
 
     async def package_details(
         self,

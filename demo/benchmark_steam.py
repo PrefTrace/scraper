@@ -42,13 +42,13 @@ STEAM_TABLES = (
     "steam_system_requirements",
     "steam_features",
     "steam_accessibility_features",
+    "steam_category_localizations",
     "steam_deck_support",
     "steam_eulas",
     "steam_controllers",
     "steam_organization_credits",
     "steam_organizations",
     "steam_supported_languages",
-    "steam_package_country_restrictions",
     "steam_depots",
     "steam_app_depots",
     "steam_depot_os",
@@ -211,6 +211,36 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
         connection.execute("SELECT COUNT(*) FROM steam_bundle_prices").fetchone()[0]
     )
     total_price_rows = edition_price_rows + bundle_price_rows
+    price_observation_states = {
+        "total": edition_price_rows,
+        "observed_unavailable": int(
+            connection.execute(
+                "SELECT COUNT(*) FROM steam_edition_prices WHERE initial IS NULL AND final IS NULL"
+            ).fetchone()[0]
+        ),
+        "permanent_free": int(
+            connection.execute(
+                "SELECT COUNT(*) FROM steam_edition_prices "
+                "WHERE initial = 0 AND final = 0 AND discount_percent IS NULL"
+            ).fetchone()[0]
+        ),
+        "free_promotion_candidates": int(
+            connection.execute(
+                "SELECT COUNT(*) FROM steam_edition_prices WHERE initial > 0 AND final = 0"
+            ).fetchone()[0]
+        ),
+        "paid_available": int(
+            connection.execute(
+                "SELECT COUNT(*) FROM steam_edition_prices WHERE final > 0"
+            ).fetchone()[0]
+        ),
+        "anomaly_initial_null_final_present": int(
+            connection.execute(
+                "SELECT COUNT(*) FROM steam_edition_prices "
+                "WHERE initial IS NULL AND final IS NOT NULL"
+            ).fetchone()[0]
+        ),
+    }
     known_edition_prices = int(
         connection.execute(
             "SELECT COUNT(*) FROM steam_edition_prices WHERE TRIM(price_region) <> ''"
@@ -268,9 +298,6 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
             "SELECT COUNT(*) FROM steam_bundle_prices "
             "WHERE effective_discount_percent > 0 AND discount_end_at IS NOT NULL"
         ).fetchone()[0]
-    )
-    country_restrictions = int(
-        connection.execute("SELECT COUNT(*) FROM steam_package_country_restrictions").fetchone()[0]
     )
     allowed_languages = set(STEAM_LANGUAGE_CODE_TO_BCP47.values())
     stored_languages = [
@@ -347,19 +374,28 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
                 int(row[0])
                 for table in ("steam_features", "steam_accessibility_features")
                 for row in connection.execute(
-                    f"SELECT category_id FROM {table} WHERE english_name IS NULL"
+                    f"SELECT relation.category_id FROM {table} AS relation "
+                    "WHERE NOT EXISTS (SELECT 1 FROM steam_category_localizations AS localization "
+                    "WHERE localization.category_id = relation.category_id)"
                 )
             }
         ),
-        "feature_name_null": int(
+        "feature_without_localization": int(
             connection.execute(
-                "SELECT COUNT(*) FROM steam_features WHERE english_name IS NULL"
+                "SELECT COUNT(*) FROM steam_features AS relation "
+                "WHERE NOT EXISTS (SELECT 1 FROM steam_category_localizations AS localization "
+                "WHERE localization.category_id = relation.category_id)"
             ).fetchone()[0]
         ),
-        "accessibility_name_null": int(
+        "accessibility_without_localization": int(
             connection.execute(
-                "SELECT COUNT(*) FROM steam_accessibility_features WHERE english_name IS NULL"
+                "SELECT COUNT(*) FROM steam_accessibility_features AS relation "
+                "WHERE NOT EXISTS (SELECT 1 FROM steam_category_localizations AS localization "
+                "WHERE localization.category_id = relation.category_id)"
             ).fetchone()[0]
+        ),
+        "localization_count": int(
+            connection.execute("SELECT COUNT(*) FROM steam_category_localizations").fetchone()[0]
         ),
         "diagnostics": int(
             connection.execute(
@@ -434,15 +470,7 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall()
     rating_minimum_age_coverage = sum(row[2] is not None for row in rating_rows)
     rating_decodable_but_null = sum(
-        row[2] is None
-        and bool(row[1])
-        and (
-            str(row[0]).upper() == "PEGI"
-            and any(char.isdigit() for char in str(row[1]))
-            or str(row[0]).upper() in {"ESRB", "USK"}
-            and str(row[1]).upper() in {"EC", "E", "E10+", "T", "M", "AO"}
-        )
-        for row in rating_rows
+        row[2] is None and bool(row[1]) and str(row[1]).strip().isdigit() for row in rating_rows
     )
     depot_count = int(connection.execute("SELECT COUNT(*) FROM steam_depots").fetchone()[0])
     shared_depot_count = int(
@@ -464,6 +492,14 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     tag_count = int(connection.execute("SELECT COUNT(*) FROM steam_tags").fetchone()[0])
     tag_localization_count = int(
         connection.execute("SELECT COUNT(*) FROM steam_tag_localizations").fetchone()[0]
+    )
+    tags_with_weight = int(
+        connection.execute("SELECT COUNT(*) FROM steam_tags WHERE weight IS NOT NULL").fetchone()[0]
+    )
+    synthetic_tag_index_rows = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_tags WHERE tag_id BETWEEN 0 AND 19"
+        ).fetchone()[0]
     )
     genre_count = int(connection.execute("SELECT COUNT(*) FROM steam_genres").fetchone()[0])
     genre_localization_count = int(
@@ -493,6 +529,25 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     workshop_collection_coverage = int(
         connection.execute(
             "SELECT COUNT(*) FROM steam_workshop_stats WHERE collection_count IS NOT NULL"
+        ).fetchone()[0]
+    )
+    workshop_copied_totals = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_workshop_stats "
+            "WHERE published_file_count IS NOT NULL AND collection_count IS NOT NULL "
+            "AND published_file_count = collection_count"
+        ).fetchone()[0]
+    )
+    runtime_restriction_diagnostics = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM source_diagnostics WHERE source = 'steam' "
+            "AND code LIKE 'steam_runtime_restriction_%'"
+        ).fetchone()[0]
+    )
+    regional_edition_diagnostics = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM source_diagnostics WHERE source = 'steam' "
+            "AND code LIKE 'steam_regional_edition_%'"
         ).fetchone()[0]
     )
     duplicate_diagnostics = int(
@@ -532,6 +587,7 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
         and set(app_types).issubset(allowed_types | {"<null>"})
         and set(release_status).issubset(allowed_release_states)
         and price_consistency_violations == 0
+        and workshop_copied_totals == 0
         and duplicate_diagnostics == 0
     )
     achievements_status = (
@@ -546,11 +602,11 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
         "known_price_regions": known_price_rows,
         "known_currency": known_currency_rows,
         "total_price_rows": total_price_rows,
+        "price_observations": price_observation_states,
         "price_regions": price_regions,
         "currencies": currencies,
         "price_consistency_violations": price_consistency_violations,
         "active_discounts_with_end_at": active_discounts_with_end,
-        "country_restrictions": country_restrictions,
         "empty_string_violations": empty_strings,
         "nullable_boolean_distributions": boolean_distributions,
         "categories": unknown_category_rows,
@@ -579,7 +635,12 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
             "manifest_count": manifest_count,
             "suspicious_zero_profiles": suspicious_zero_profiles,
         },
-        "tags": {"count": tag_count, "localization_count": tag_localization_count},
+        "tags": {
+            "count": tag_count,
+            "localization_count": tag_localization_count,
+            "with_weight": tags_with_weight,
+            "synthetic_index_rows": synthetic_tag_index_rows,
+        },
         "genres": {"count": genre_count, "localization_count": genre_localization_count},
         "organizations": {
             "resolved": organizations_resolved,
@@ -589,6 +650,22 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
             "available": workshop_available,
             "item_count_coverage": workshop_item_coverage,
             "collection_count_coverage": workshop_collection_coverage,
+            "copied_total_rows": workshop_copied_totals,
+        },
+        "regional_price_semantics": {
+            "regional_edition_known": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM steam_edition_prices WHERE regional_edition IS NOT NULL"
+                ).fetchone()[0]
+            ),
+            "runtime_restriction_known": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM steam_edition_prices "
+                    "WHERE run_region_restricted IS NOT NULL"
+                ).fetchone()[0]
+            ),
+            "regional_edition_diagnostics": regional_edition_diagnostics,
+            "runtime_restriction_diagnostics": runtime_restriction_diagnostics,
         },
         "duplicate_diagnostics": duplicate_diagnostics,
         "orphan_packages": orphan_packages,
@@ -618,6 +695,126 @@ def _source_coverage(connection: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+def _real_integration_controls(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Verify live-source facts from the produced DB, separate from fixtures."""
+
+    cases: list[dict[str, Any]] = []
+
+    def add(name: str, ok: bool, evidence: dict[str, Any]) -> None:
+        cases.append({"name": name, "ok": ok, "evidence": evidence})
+
+    usk_rows = connection.execute(
+        "SELECT rating, minimum_age FROM steam_age_ratings "
+        "WHERE app_id = 281990 AND LOWER(standard) = 'usk'"
+    ).fetchall()
+    add(
+        "281990_usk_numeric_minimum_age",
+        any(str(rating).strip() == "6" and minimum_age == 6 for rating, minimum_age in usk_rows),
+        {"rows": [list(row) for row in usk_rows]},
+    )
+    free_rows = connection.execute(
+        "SELECT price_region, currency, initial, final, discount_percent "
+        "FROM steam_edition_prices WHERE package_id = 320246"
+    ).fetchall()
+    add(
+        "320246_permanent_free",
+        any(
+            initial == 0 and final == 0 and discount is None
+            for _, _, initial, final, discount in free_rows
+        ),
+        {"rows": [list(row) for row in free_rows]},
+    )
+    active_discount_rows = connection.execute(
+        "SELECT package_id, discount_type, discount_end_at FROM steam_edition_prices "
+        "WHERE discount_percent > 0 AND discount_type IS NOT NULL AND discount_end_at IS NOT NULL "
+        "UNION ALL SELECT bundle_id, discount_type, discount_end_at FROM steam_bundle_prices "
+        "WHERE effective_discount_percent > 0 AND discount_type IS NOT NULL "
+        "AND discount_end_at IS NOT NULL"
+    ).fetchall()
+    add(
+        "active_discount_type_and_end",
+        bool(active_discount_rows),
+        {"rows": [list(row) for row in active_discount_rows[:10]]},
+    )
+    tag_rows = connection.execute(
+        "SELECT tag.tag_id, tag.weight, localization.language, localization.name "
+        "FROM steam_tags AS tag JOIN steam_tag_localizations AS localization "
+        "ON localization.tag_id = tag.tag_id "
+        "WHERE tag.tag_id NOT BETWEEN 0 AND 19 AND tag.weight IS NOT NULL"
+    ).fetchall()
+    add(
+        "real_tag_id_weight_localization",
+        bool(tag_rows),
+        {"rows": [list(row) for row in tag_rows[:10]]},
+    )
+    credit_rows = connection.execute(
+        "SELECT app_id, status, creator_clan_account_id, credited_name "
+        "FROM steam_organization_credits WHERE creator_clan_account_id IS NOT NULL"
+    ).fetchall()
+    add(
+        "organization_creator_clan_id",
+        bool(credit_rows),
+        {"rows": [list(row) for row in credit_rows[:10]]},
+    )
+    workshop_copies = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM steam_workshop_stats "
+            "WHERE published_file_count IS NOT NULL AND collection_count IS NOT NULL "
+            "AND published_file_count = collection_count"
+        ).fetchone()[0]
+    )
+    add("workshop_collection_not_copied", workshop_copies == 0, {"copied_rows": workshop_copies})
+    depot_languages = [
+        str(row[0])
+        for row in connection.execute(
+            "SELECT DISTINCT language FROM steam_depots "
+            "WHERE language IS NOT NULL ORDER BY language"
+        )
+    ]
+    add(
+        "multilingual_depot_bcp47",
+        len(depot_languages) >= 2,
+        {"languages": depot_languages},
+    )
+    regional_rows = connection.execute(
+        "SELECT package_id, price_region, regional_edition FROM steam_edition_prices"
+    ).fetchall()
+    regional_diagnostics = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM source_diagnostics WHERE source = 'steam' "
+            "AND code LIKE 'steam_regional_edition_%'"
+        ).fetchone()[0]
+    )
+    add(
+        "regional_edition_candidate",
+        bool(regional_rows)
+        and (any(row[2] is not None for row in regional_rows) or regional_diagnostics > 0),
+        {"rows": [list(row) for row in regional_rows[:10]], "diagnostics": regional_diagnostics},
+    )
+    runtime_rows = connection.execute(
+        "SELECT package_id, price_region, run_region_restricted FROM steam_edition_prices"
+    ).fetchall()
+    runtime_diagnostics = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM source_diagnostics WHERE source = 'steam' "
+            "AND code LIKE 'steam_runtime_restriction_%'"
+        ).fetchone()[0]
+    )
+    add(
+        "runtime_region_restriction_result_or_diagnostic",
+        bool(runtime_rows)
+        and (any(row[2] is not None for row in runtime_rows) or runtime_diagnostics > 0),
+        {"rows": [list(row) for row in runtime_rows[:10]], "diagnostics": runtime_diagnostics},
+    )
+    return {
+        "ok": all(case["ok"] for case in cases),
+        "total": len(cases),
+        "passed": sum(case["ok"] for case in cases),
+        "failed": [case for case in cases if not case["ok"]],
+        "cases": cases,
+    }
+
+
 async def run(
     input_path: Path = PROJECT_ROOT / "appids.txt",
     output_dir: Path = PROJECT_ROOT / "outputs" / "real_pipeline_10",
@@ -640,7 +837,10 @@ async def run(
     )
     database = ScraperDatabase(config)
     steam_service = SteamGameSyncService(database)
-    pipeline = ScraperPipeline(PipelineServices(steam=steam_service, wikidata=None))
+    # Benchmark price rows are an explicit KZ observation, not a global map.
+    pipeline = ScraperPipeline(
+        PipelineServices(steam=steam_service, wikidata=None, steam_store_country="kz")
+    )
     metrics = HttpMetrics()
     original_get: Any = httpx.AsyncClient.get
 
@@ -670,7 +870,10 @@ async def run(
         idempotency_started = time.perf_counter()
         idempotency_results = list(
             await asyncio.gather(
-                *(steam_service.refresh(app_id, force=True) for app_id in app_ids),
+                *(
+                    steam_service.refresh(app_id, store_country="kz", force=True)
+                    for app_id in app_ids
+                ),
                 return_exceptions=True,
             )
         )
@@ -687,6 +890,7 @@ async def run(
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_key_errors = [list(row) for row in connection.execute("PRAGMA foreign_key_check")]
         coverage = _source_coverage(connection)
+        real_integration_controls = _real_integration_controls(connection)
     idempotency_after = audit["row_counts"]
     idempotency_statuses = [
         refresh.status
@@ -707,7 +911,11 @@ async def run(
     schema_contract_ok = bool(audit["ok"])
     parser_semantics_ok = bool(positive_controls["ok"])
     persistence_ok = integrity == "ok" and not foreign_key_errors
-    benchmark_control_cases_ok = bool(positive_controls["ok"] and coverage["core_semantics_ok"])
+    benchmark_control_cases_ok = bool(
+        positive_controls["ok"]
+        and real_integration_controls["ok"]
+        and coverage["core_semantics_ok"]
+    )
     queue_statuses = Counter(state.status for state in states)
     benchmark: dict[str, Any] = {
         "source": "Steam",
@@ -716,6 +924,7 @@ async def run(
         "input_file": str(input_path),
         "limit": limit,
         "app_ids": app_ids,
+        "observation_regions": ["KZ"],
         "database_file": str(database_path),
         "added_primary_tasks": added,
         "elapsed_seconds": round(elapsed, 4),
@@ -740,6 +949,7 @@ async def run(
         "benchmark_control_cases_ok": benchmark_control_cases_ok,
         "source_coverage_ok": bool(coverage["ok"]),
         "positive_controls": positive_controls,
+        "real_integration_controls": real_integration_controls,
         "source_coverage": coverage,
         "coverage_before_after": {
             "scope": "Steam only; Wikidata deprecated and skipped",
@@ -792,7 +1002,9 @@ async def run(
         f"currencies: `{coverage['currencies']}`.",
         f"- Price consistency violations: `{coverage['price_consistency_violations']}`; "
         f"active discounts with end_at: `{coverage['active_discounts_with_end_at']}`.",
-        f"- Explicit country restrictions: `{coverage['country_restrictions']}`.",
+        f"- Price observations: `{coverage['price_observations']}`. Row absence is not "
+        "counted as an unavailable region.",
+        f"- Regional package semantics: `{coverage['regional_price_semantics']}`.",
         f"- Empty-string violations: `{len(coverage['empty_string_violations'])}` fields.",
         f"- Unresolved editions: `{coverage['unresolved_editions']}`.",
         f"- Build install-profile coverage: `{coverage['branch_profiles']['coverage']}`.",
@@ -818,6 +1030,8 @@ async def run(
         "## Positive controls",
         "",
         f"- Passed: `{positive_controls['passed']}/{positive_controls['total']}`.",
+        f"- Live source-backed controls: `{real_integration_controls['passed']}/"
+        f"{real_integration_controls['total']}`.",
     ]
     lines.extend(["", "## Steam table rows", "", "| Table | Rows |", "|---|---:|"])
     lines.extend(f"| `{table}` | {audit['row_counts'][table]} |" for table in STEAM_TABLES)

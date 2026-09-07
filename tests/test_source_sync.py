@@ -7,7 +7,12 @@ from scraper.sources.hltb_deprecated import HltbSyncService
 from scraper.sources.steam import SteamGameSyncService
 from scraper.steam.orm import SteamApp, SteamBuildBranch, SteamOrganizationCredit
 from scraper.wikidata_deprecated.config import ScraperConfig
-from scraper.wikidata_deprecated.orm import ScraperDatabase, SourceFact, SourceRefresh
+from scraper.wikidata_deprecated.orm import (
+    ScraperDatabase,
+    SourceDiagnostic,
+    SourceFact,
+    SourceRefresh,
+)
 
 
 def _database(tmp_path, name: str) -> ScraperDatabase:
@@ -143,5 +148,38 @@ async def test_steam_details_and_substructures_are_orm_cached(monkeypatch, tmp_p
         assert app is not None and app.type == "game"
         assert branch is not None and branch.build_id == 123
         assert [item.organization_name for item in organizations] == ["Dev", "Pub"]
+    finally:
+        await database.dispose()
+
+
+async def test_steam_scope_consolidates_duplicate_diagnostic_codes(tmp_path) -> None:
+    database = _database(tmp_path, "steam-diagnostics.sqlite3")
+    service = SteamGameSyncService(database)
+    try:
+        await service._persist(
+            42,
+            "store:en-US:kz",
+            data={
+                "diagnostics": [
+                    {"code": "steam_source_unavailable", "message": "package 10"},
+                    {"code": "steam_source_unavailable", "message": "package 11"},
+                    {"code": "steam_source_unavailable", "message": "package 10"},
+                ]
+            },
+            status="ready",
+        )
+        async with database.session() as session:
+            diagnostics = (
+                await session.scalars(
+                    select(SourceDiagnostic).where(
+                        SourceDiagnostic.source == "steam",
+                        SourceDiagnostic.steam_app_id == 42,
+                        SourceDiagnostic.scope == "store:en-US:kz",
+                    )
+                )
+            ).all()
+        assert len(diagnostics) == 1
+        assert diagnostics[0].code == "steam_source_unavailable"
+        assert diagnostics[0].message == "package 10 | package 11"
     finally:
         await database.dispose()

@@ -106,8 +106,10 @@ class EditionPrice(Model):
     initial: int | None = None
     final: int | None = None
     discount_percent: int | None = None
-    discount_description: str | None = None
+    discount_type: str | None = None
     discount_end_at: datetime | None = None
+    regional_edition: bool | None = None
+    run_region_restricted: bool | None = None
     price_type: str = "one_time"
     period: str | None = None
     period_units: int | None = None
@@ -128,7 +130,7 @@ class BundlePrice(Model):
     effective_discount_percent: int | None = None
     initial: int | None = None
     final: int | None = None
-    discount_description: str | None = None
+    discount_type: str | None = None
     discount_end_at: datetime | None = None
 
     @property
@@ -218,12 +220,6 @@ class DepotManifest(Model):
     manifest_id: str | None = None
     download_size: int | None = None
     disk_size: int | None = None
-
-
-class PackageCountryRestriction(Model):
-    package_id: int
-    restriction_type: str
-    country_code: str
 
 
 class WorkshopStats(Model):

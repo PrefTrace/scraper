@@ -5,17 +5,21 @@ from pathlib import Path
 
 from scraper.steam.locales import normalize_locale
 from scraper.steam.parsers import (
+    annotate_package_price_observations,
     normalize_release_status,
     parse_achievement_schema,
     parse_app_details,
     parse_appinfo_semantics,
+    parse_build_branches,
     parse_bundle_membership,
+    parse_depots,
     parse_descriptors,
     parse_external_links,
     parse_global_achievement_percentages,
     parse_languages_fallback,
     parse_media,
     parse_store_browse_item,
+    parse_workshop_stats,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "steam"
@@ -98,9 +102,7 @@ def test_public_storebrowse_preserves_subscription_periods_and_bundle_membership
     )
 
     recurring = {
-        item.package_id: item
-        for item in parsed["edition_prices"]
-        if item.price_type == "recurring"
+        item.package_id: item for item in parsed["edition_prices"] if item.price_type == "recurring"
     }
     assert {item.period_units for item in recurring.values()} == {1, 3, 6}
     assert all(item.period == "month" for item in recurring.values())
@@ -145,9 +147,7 @@ def test_bundle_memberships_are_read_only_from_bundle_specific_response() -> Non
             {"bundleid": 100, "final_price_in_cents": 1000},
             {"bundleid": 200, "final_price_in_cents": 1500},
         ],
-        "included_items": {
-            "included_packages": [{"best_purchase_option": {"packageid": 999}}]
-        },
+        "included_items": {"included_packages": [{"best_purchase_option": {"packageid": 999}}]},
     }
     parsed = parse_store_browse_item(app_payload)
     assert [bundle.edition_package_ids for bundle in parsed["bundles"]] == [[], []]
@@ -230,3 +230,207 @@ def test_structured_links_and_asset_mapping_are_canonical() -> None:
     assert [item.media_type for item in media].count("main_capsule") == 1
     trailer = next(item for item in media if item.media_type == "trailer")
     assert trailer.url == "https://cdn.example/trailer.webm"
+
+
+def test_package_price_rows_preserve_explicit_observation_states() -> None:
+    parsed = parse_app_details(
+        {
+            "name": "Example",
+            "type": "Game",
+            "package_groups": [
+                {
+                    "subs": [
+                        {"packageid": 10, "price_in_cents": 1000},
+                        {"packageid": 11},
+                        {
+                            "packageid": 12,
+                            "price_in_cents_with_discount": 777,
+                            "percent_savings": 0,
+                        },
+                        {
+                            "packageid": 320246,
+                            "is_free_license": True,
+                            "price_in_cents_with_discount": 0,
+                            "percent_savings": 0,
+                        },
+                        {
+                            "packageid": 13,
+                            "is_free": True,
+                            "price_in_cents": 1000,
+                            "price_in_cents_with_discount": 0,
+                            "percent_savings": 100,
+                        },
+                    ]
+                }
+            ],
+        },
+        normalize_locale("en-US"),
+        store_country="KZ",
+        store_browse={
+            "response": {
+                "store_items": [
+                    {
+                        "purchase_options": [
+                            {
+                                "packageid": 10,
+                                "original_price_in_cents": 1000,
+                                "final_price_in_cents": 800,
+                                "discount_pct": 20,
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+    )
+    prices = {item.package_id: item for item in parsed["edition_prices"]}
+    assert (prices[10].initial, prices[10].final) == (1000, 800)
+    assert (prices[11].initial, prices[11].final, prices[11].price_region) == (None, None, "KZ")
+    assert (prices[12].initial, prices[12].final, prices[12].discount_percent) == (777, 777, 0)
+    assert (
+        prices[320246].initial,
+        prices[320246].final,
+        prices[320246].discount_percent,
+    ) == (0, 0, None)
+    assert (prices[13].initial, prices[13].final, prices[13].discount_percent) == (1000, 0, 100)
+
+
+def test_source_discount_token_runtime_restriction_and_workshop_semantics() -> None:
+    price = parse_store_browse_item(
+        {
+            "purchase_options": [
+                {
+                    "packageid": 10,
+                    "price_region": "US",
+                    "original_price_in_cents": 1000,
+                    "final_price_in_cents": 500,
+                    "discount_pct": 50,
+                    "active_discounts": [
+                        {
+                            "discount_description": "#unknown_discount_token",
+                            "discount_end_date": 1_800_000_000,
+                        }
+                    ],
+                }
+            ]
+        }
+    )["edition_prices"][0]
+    assert price.discount_type == "#unknown_discount_token"
+    assert price.discount_end_at is not None
+    diagnostics = annotate_package_price_observations(
+        [price],
+        {10: {"OnlyAllowRunInCountries": "CA,MX"}},
+    )
+    assert price.run_region_restricted is True
+    assert price.regional_edition is None
+    assert any(item["code"] == "steam_regional_edition_source_unavailable" for item in diagnostics)
+    workshop = parse_workshop_stats(
+        {"common": {"category": {"category_33": "1"}}},
+        '\\"workshopNumbers\\":{\\"total\\":12}',
+        collection_html='\\"workshopNumbers\\":{\\"total\\":3}',
+    )
+    assert (
+        workshop.workshop_available,
+        workshop.published_file_count,
+        workshop.collection_count,
+    ) == (
+        True,
+        12,
+        None,
+    )
+
+
+def test_storebrowse_identity_tags_and_depot_source_keys_are_not_legacy_indexes() -> None:
+    browse = parse_store_browse_item(
+        {
+            "tags": [{"tagid": 1755, "weight": 954}],
+            "basic_info": {
+                "developers": [{"name": "Studio", "creator_clan_account_id": 42}],
+                "publishers": [{"name": "Publisher", "creator_clan_account_id": 43}],
+            },
+        },
+        language="en",
+    )
+    assert [(item.tag_id, item.weight) for item in browse["tags"]] == [(1755, 954)]
+    assert {
+        (item.status, item.creator_clan_account_id, item.credited_name)
+        for item in browse["organizations"]
+    } == {("developer", 42, "Studio"), ("publisher", 43, "Publisher")}
+    depots = parse_depots(
+        {
+            "depots": {
+                "10": {
+                    "optionaldlc": "99",
+                    "systemdefined": "1",
+                    "config": {"language": "brazilian", "oslist": "windows,linux"},
+                    "manifests": {"public": {"download": 0, "size": 0}},
+                }
+            }
+        }
+    )
+    depot = depots["depots"][0]
+    assert (depot.language, depot.optional_dlc_app_id, depot.system_defined) == ("pt-BR", 99, True)
+    assert depots["manifests"][0].download_size == 0
+
+
+def test_branch_profiles_combine_common_os_language_and_shared_depots() -> None:
+    branches = parse_build_branches(
+        {
+            "depots": {
+                "branches": {"public": {"buildid": "7"}},
+                "1": {"manifests": {"public": {"download": 100, "size": 100}}},
+                "2": {
+                    "config": {"oslist": "windows,linux"},
+                    "manifests": {"public": {"download": 50, "size": 50}},
+                },
+                "3": {
+                    "config": {"oslist": "windows"},
+                    "manifests": {"public": {"download": 200, "size": 200}},
+                },
+                "4": {
+                    "config": {"oslist": "linux"},
+                    "manifests": {"public": {"download": 300, "size": 300}},
+                },
+                "5": {
+                    "config": {"language": "russian"},
+                    "manifests": {"public": {"download": 10, "size": 10}},
+                },
+                "6": {
+                    "config": {"language": "english"},
+                    "manifests": {"public": {"download": 20, "size": 20}},
+                },
+                "7": {"depotfromapp": "99", "config": {"oslist": "windows"}},
+            }
+        },
+        shared_app_infos={
+            99: {"depots": {"7": {"manifests": {"public": {"download": 500, "size": 500}}}}}
+        },
+    )
+    public = next(branch for branch in branches if branch.name == "public")
+    # Windows and Linux both include depot 2; Windows also includes the
+    # resolved shared depot. Each profile includes one selected language.
+    assert (
+        public.download_size_min,
+        public.download_size_median,
+        public.download_size_max,
+    ) == (460, 665, 870)
+    assert (public.disk_size_min, public.disk_size_median, public.disk_size_max) == (460, 665, 870)
+
+
+def test_numeric_age_vac_negative_and_descriptor_title_cleanup() -> None:
+    parsed = parse_app_details(
+        {
+            "name": "Cyberpunk 2077",
+            "type": "Game",
+            "ratings": {
+                "usk": {"rating": "6", "descriptors": "Cyberpunk 2077 contains Strong Language"}
+            },
+        },
+        normalize_locale("en-US"),
+        app_info={"common": {"category": {"category_2": "1"}}},
+    )
+    assert parsed["age_ratings"][0].minimum_age == 6
+    assert parsed["vac_enabled"] is False
+    assert "cyberpunk 2077 strong language" not in {
+        item.name for item in parsed["descriptors"] if item.name
+    }

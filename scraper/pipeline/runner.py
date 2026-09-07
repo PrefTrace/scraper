@@ -26,6 +26,7 @@ from .queue import InMemoryTaskQueue
 class PipelineServices:
     steam: SteamGameSyncService
     wikidata: WikidataSyncService | None = None
+    steam_store_country: str | None = None
 
 
 class ScraperPipeline:
@@ -55,7 +56,12 @@ class ScraperPipeline:
 
     async def _handle_steam(self, task: QueueTask, _queue: InMemoryTaskQueue) -> object:
         assert task.app_id is not None
-        result = await self.services.steam.refresh(task.app_id)
+        refresh_kwargs = (
+            {"store_country": self.services.steam_store_country}
+            if self.services.steam_store_country is not None
+            else {}
+        )
+        result = await self.services.steam.refresh(task.app_id, **refresh_kwargs)
         await self._enqueue_enrichment(task.app_id, result)
         return result
 

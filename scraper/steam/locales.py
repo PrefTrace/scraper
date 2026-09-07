@@ -10,9 +10,6 @@ class LocaleInfo:
     steam_language: str
 
 
-DEFAULT_STORE_COUNTRY = "kz"
-
-
 _LANGUAGES: dict[str, tuple[str, str]] = {
     "ar": ("ar", "arabic"),
     "bg": ("bg", "bulgarian"),

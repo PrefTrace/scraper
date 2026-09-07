@@ -10,13 +10,13 @@ from sqlalchemy import delete, select
 
 from scraper.steam.client import SteamClient, SteamClientError
 from scraper.steam.locales import (
-    DEFAULT_STORE_COUNTRY,
     LocaleInfo,
     normalize_locales,
     normalize_store_country,
 )
 from scraper.steam.orm import SteamAppLocalization, SteamOrganizationCredit
 from scraper.steam.parsers import (
+    annotate_package_price_observations,
     normalize_steam_type,
     parse_achievement_schema,
     parse_app_details,
@@ -24,18 +24,16 @@ from scraper.steam.parsers import (
     parse_appinfo_semantics,
     parse_build_branches,
     parse_bundle_membership,
+    parse_creator_home_metadata,
     parse_depots,
     parse_eulas,
     parse_external_links,
     parse_external_reviews,
     parse_global_achievement_percentages,
-    parse_html_creator_entities,
     parse_html_structured_tags,
     parse_language_table,
     parse_package_metadata,
     parse_store_browse_item,
-    parse_structured_genres,
-    parse_structured_tags,
     parse_tags,
     parse_workshop_stats,
 )
@@ -86,7 +84,7 @@ class SteamGameSyncService(CachedSourceService):
         app_id: int,
         *,
         languages: Sequence[str] | None = None,
-        store_country: str | None = DEFAULT_STORE_COUNTRY,
+        store_country: str | None = None,
         positive_review_count: int = 4,
         negative_review_count: int = 4,
         review_pages: int | None = None,
@@ -112,29 +110,29 @@ class SteamGameSyncService(CachedSourceService):
             package_metadata_lock = asyncio.Lock()
             achievement_percentages: dict[str, float] | None = None
             achievement_percentages_lock = asyncio.Lock()
-            category_registry: dict[int, str] | None = None
+            category_registries: dict[str, dict[int, str]] = {}
             category_registry_lock = asyncio.Lock()
 
-            async def get_app_info() -> dict[str, Any]:
+            async def get_app_info(target_app_id: int = app_id) -> dict[str, Any]:
                 async with app_info_lock:
-                    if app_id not in app_info_cache:
-                        app_info_cache[app_id] = await steam.public_app_info(app_id)
-                    return app_info_cache[app_id]
+                    if target_app_id not in app_info_cache:
+                        app_info_cache[target_app_id] = await steam.public_app_info(target_app_id)
+                    return app_info_cache[target_app_id]
 
-            async def get_category_registry() -> dict[int, str]:
-                nonlocal category_registry
+            async def get_category_registry(locale: LocaleInfo) -> dict[int, str]:
+                cache_key = locale.web_language
                 async with category_registry_lock:
-                    if category_registry is None:
+                    if cache_key not in category_registries:
                         try:
                             loader = getattr(steam, "category_registry", None)
-                            category_registry = (
-                                await loader(api_key=self.config.steam_web_api_key)
-                                if loader is not None
-                                else {}
+                            category_registries[cache_key] = (
+                                # Store categories are public; never attach the
+                                # achievement API credential to this request.
+                                await loader(locale=locale) if loader is not None else {}
                             )
-                        except (SteamClientError, httpx.HTTPError):
-                            category_registry = {}
-                    return category_registry
+                        except (SteamClientError, httpx.HTTPError, TypeError):
+                            category_registries[cache_key] = {}
+                    return category_registries[cache_key]
 
             async def get_store_browse(
                 locale: LocaleInfo, *, bundle_id: int | None = None
@@ -158,7 +156,7 @@ class SteamGameSyncService(CachedSourceService):
                 browse = await get_store_browse(locale)
                 if not browse:
                     return browse
-                parsed = parse_store_browse_item(browse)
+                parsed = parse_store_browse_item(browse, language=locale.web_language)
                 bundles = parsed.get("bundles", [])
                 memberships: dict[int, list[int]] = {}
                 for bundle in bundles:
@@ -173,9 +171,11 @@ class SteamGameSyncService(CachedSourceService):
                 enriched["_bundle_memberships"] = memberships
                 return enriched
 
-            async def get_package_metadata(package_ids: set[int], locale: LocaleInfo) -> list[Any]:
+            async def get_package_metadata_raw(
+                package_ids: set[int], locale: LocaleInfo
+            ) -> dict[int, dict[str, Any]]:
                 if not package_ids:
-                    return []
+                    return {}
                 cache_key = f"{locale.steam_language}:{country or 'US'}"
                 async with package_metadata_lock:
                     cached = package_metadata_cache.setdefault(cache_key, {})
@@ -196,13 +196,11 @@ class SteamGameSyncService(CachedSourceService):
                                 cached.update(fetched)
                         except (SteamClientError, httpx.HTTPError, TypeError):
                             pass
-                    return parse_package_metadata(
-                        {
-                            package_id: cached[package_id]
-                            for package_id in package_ids
-                            if package_id in cached
-                        }
-                    )
+                    return {
+                        package_id: cached[package_id]
+                        for package_id in package_ids
+                        if package_id in cached
+                    }
 
             async def enrich_package_metadata(
                 parsed: dict[str, Any], locale: LocaleInfo
@@ -217,11 +215,52 @@ class SteamGameSyncService(CachedSourceService):
                     for bundle in parsed.get("bundles", [])
                     for package_id in getattr(bundle, "edition_package_ids", [])
                 }
-                parsed["edition_metadata"] = await get_package_metadata(
-                    bundle_ids - resolved_ids,
+                package_metadata = await get_package_metadata_raw(
+                    resolved_ids | bundle_ids,
                     locale,
                 )
+                parsed["edition_metadata"] = parse_package_metadata(package_metadata)
+                parsed.setdefault("diagnostics", []).extend(
+                    annotate_package_price_observations(
+                        list(parsed.get("edition_prices", [])),
+                        package_metadata,
+                    )
+                )
                 return parsed
+
+            async def get_shared_app_infos(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
+                """Resolve public source AppInfo for every referenced shared depot."""
+
+                resolved: dict[int, dict[str, Any]] = {}
+                pending: list[int] = []
+                seen: set[int] = {app_id}
+
+                def add_references(info: dict[str, Any]) -> None:
+                    depots = info.get("depots")
+                    if not isinstance(depots, dict):
+                        return
+                    for raw in depots.values():
+                        if not isinstance(raw, dict):
+                            continue
+                        raw_source = raw.get("depotfromapp", raw.get("depot_from_app"))
+                        try:
+                            source_id = int(raw_source)
+                        except (TypeError, ValueError):
+                            continue
+                        if source_id not in seen:
+                            seen.add(source_id)
+                            pending.append(source_id)
+
+                add_references(payload)
+                while pending:
+                    source_id = pending.pop()
+                    try:
+                        source_info = await get_app_info(source_id)
+                    except (SteamClientError, httpx.HTTPError):
+                        continue
+                    resolved[source_id] = source_info
+                    add_references(source_info)
+                return resolved
 
             async def get_achievement_percentages() -> dict[str, float]:
                 nonlocal achievement_percentages
@@ -283,9 +322,7 @@ class SteamGameSyncService(CachedSourceService):
                         )
                         data = dict(data)
                         for english_key in (
-                            "categories",
                             "content_descriptors",
-                            "genres",
                             "ratings",
                             "ext_user_account_notice",
                             "drm_notice",
@@ -293,7 +330,7 @@ class SteamGameSyncService(CachedSourceService):
                             if english_key in requirements_data:
                                 data[english_key] = requirements_data[english_key]
                     app_info = await get_app_info()
-                    registry = await get_category_registry()
+                    registry = await get_category_registry(locale)
                     browse = await get_enriched_store_browse(locale)
                     parsed = parse_app_details(
                         data,
@@ -313,6 +350,7 @@ class SteamGameSyncService(CachedSourceService):
                         # Global app/package/requirements relations are still
                         # written from the explicit English response.
                         english_locale = normalize_locales(["en-US"])[0]
+                        english_registry = await get_category_registry(english_locale)
                         english_browse = await get_enriched_store_browse(english_locale)
                         global_data = parse_app_details(
                             requirements_data,
@@ -322,7 +360,7 @@ class SteamGameSyncService(CachedSourceService):
                             requirements_data=requirements_data,
                             app_info=app_info,
                             store_browse=english_browse,
-                            category_registry=registry,
+                            category_registry=english_registry,
                         )
                         parsed["global_data"] = await enrich_package_metadata(
                             global_data,
@@ -347,7 +385,7 @@ class SteamGameSyncService(CachedSourceService):
                     app_info = await get_app_info()
                     common = app_info.get("common") if isinstance(app_info, dict) else {}
                     common = common if isinstance(common, dict) else {}
-                    registry = await get_category_registry()
+                    registry = await get_category_registry(locale)
                     semantics = parse_appinfo_semantics(
                         common,
                         registry=registry,
@@ -359,27 +397,30 @@ class SteamGameSyncService(CachedSourceService):
                         common.get("supported_languages")
                     )
                     browse = await get_store_browse(locale)
-                    browse_data = parse_store_browse_item(browse)
-                    workshop_html = collection_html = None
+                    browse_data = parse_store_browse_item(browse, language=locale.web_language)
+                    workshop_html = None
                     workshop_loader = getattr(steam, "workshop_page", None)
                     if workshop_loader is not None:
                         try:
                             workshop_html = await workshop_loader(app_id)
                         except (SteamClientError, httpx.HTTPError, TypeError):
                             workshop_html = None
-                        try:
-                            collection_html = await workshop_loader(app_id, section="collections")
-                        except (SteamClientError, httpx.HTTPError, TypeError):
-                            collection_html = None
-                    tags, tag_localizations = parse_structured_tags(
-                        common, language=locale.requested
+                    tags = list(browse_data.get("tags", []))
+                    tag_localizations = list(browse_data.get("tag_localizations", []))
+                    html_tags, html_tag_localizations = parse_html_structured_tags(
+                        metadata_html,
+                        language=locale.web_language,
+                        app_id=app_id,
                     )
                     if not tags:
-                        tags, tag_localizations = parse_html_structured_tags(
-                            metadata_html, language=locale.requested
-                        )
-                    genres, genre_localizations = parse_structured_genres(
-                        common, language=locale.requested
+                        tags = html_tags
+                    known_localizations = {
+                        (item.tag_id, item.language) for item in tag_localizations
+                    }
+                    tag_localizations.extend(
+                        item
+                        for item in html_tag_localizations
+                        if (item.tag_id, item.language) not in known_localizations
                     )
                     supported_languages = (
                         structured_languages
@@ -412,28 +453,59 @@ class SteamGameSyncService(CachedSourceService):
                     workshop = parse_workshop_stats(
                         common,
                         workshop_html,
-                        collection_html=collection_html,
                         app_id=app_id,
                     )
-                    if workshop.workshop_available and (
-                        workshop.published_file_count is None or workshop.collection_count is None
-                    ):
+                    if workshop.workshop_available and workshop.collection_count is None:
                         diagnostics.append(
                             {
-                                "code": "steam_workshop_totals_unavailable",
-                                "message": "Anonymous Workshop page did not expose complete totals",
+                                "code": "steam_workshop_collection_count_unavailable",
+                                "message": (
+                                    "Anonymous Workshop source did not expose a distinct "
+                                    "collection total; it was left NULL"
+                                ),
                             }
                         )
+                    organization_entities: list[dict[str, Any]] = []
+                    creator_loader = getattr(steam, "creator_home", None)
+                    creator_ids = sorted(
+                        {
+                            int(item.creator_clan_account_id)
+                            for item in browse_data.get("organizations", [])
+                            if getattr(item, "creator_clan_account_id", None) is not None
+                        }
+                    )
+                    if creator_loader is not None:
+
+                        async def load_creator(creator_id: int) -> tuple[int, str | None]:
+                            try:
+                                return creator_id, await creator_loader(creator_id)
+                            except (SteamClientError, httpx.HTTPError, TypeError):
+                                return creator_id, None
+
+                        for creator_id, creator_html in await asyncio.gather(
+                            *(load_creator(creator_id) for creator_id in creator_ids)
+                        ):
+                            metadata = parse_creator_home_metadata(creator_html, creator_id)
+                            if metadata is not None:
+                                organization_entities.append(metadata)
+                            elif creator_html is None:
+                                diagnostics.append(
+                                    {
+                                        "code": "steam_creator_home_unavailable",
+                                        "message": (
+                                            f"Creator Home metadata was unavailable for "
+                                            f"clan {creator_id}"
+                                        ),
+                                    }
+                                )
                     return {
                         "supported_languages": supported_languages,
                         "diagnostics": diagnostics,
                         "tags": parse_tags(html),
                         "structured_tags": tags,
                         "tag_localizations": tag_localizations,
-                        "genre_rows": genres,
-                        "genre_localizations": genre_localizations,
                         "workshop_stats": workshop,
-                        "organization_entities": parse_html_creator_entities(metadata_html),
+                        "organization_entities": organization_entities,
                         "external_links": parse_external_links({}, metadata_html)
                         + list(browse_data.get("external_links", [])),
                         "external_reviews": parse_external_reviews({}, metadata_html),
@@ -603,7 +675,15 @@ class SteamGameSyncService(CachedSourceService):
 
             async def branches_loader() -> object:
                 payload = await get_app_info()
-                return {"branches": parse_build_branches(payload), **parse_depots(payload)}
+                shared_app_infos = await get_shared_app_infos(payload)
+                depot_rows = parse_depots(payload, shared_app_infos=shared_app_infos)
+                return {
+                    "branches": parse_build_branches(
+                        payload,
+                        shared_app_infos=shared_app_infos,
+                    ),
+                    **depot_rows,
+                }
 
             operations.append(
                 self._refresh_scope(
@@ -726,16 +806,33 @@ class SteamGameSyncService(CachedSourceService):
                         )
                     )
                 if status == "ready" and isinstance(data, dict):
+                    # The physical diagnostic identity is (source, app, scope,
+                    # code).  A package-level parser may legitimately report
+                    # the same unavailable source condition for several
+                    # packages, so consolidate messages before flushing rather
+                    # than letting a duplicate diagnostic abort the entire
+                    # refresh transaction.
+                    diagnostics: dict[str, list[str]] = {}
                     for diagnostic in data.get("diagnostics", []):
                         if not isinstance(diagnostic, dict):
                             continue
+                        code = str(diagnostic.get("code") or "steam_diagnostic").strip()
+                        message = str(diagnostic.get("message") or "").strip()
+                        if not code:
+                            code = "steam_diagnostic"
+                        if not message:
+                            message = "Steam source reported a diagnostic without detail"
+                        messages = diagnostics.setdefault(code, [])
+                        if message not in messages:
+                            messages.append(message)
+                    for code, messages in diagnostics.items():
                         session.add(
                             SourceDiagnostic(
                                 source=self.source,
                                 steam_app_id=app_id,
                                 scope=scope,
-                                code=str(diagnostic.get("code") or "steam_diagnostic"),
-                                message=str(diagnostic.get("message") or ""),
+                                code=code,
+                                message=" | ".join(messages),
                                 observed_at=observed_at,
                             )
                         )

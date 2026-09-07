@@ -37,7 +37,7 @@ from scraper.steam.parsers import (
     parse_build_branches,
     parse_global_achievement_percentages,
 )
-from scraper.steam.storage import persist_steam_scope, remove_steam_scope
+from scraper.steam.storage import persist_steam_scope, remove_all_steam_data, remove_steam_scope
 from scraper.wikidata_deprecated.config import ScraperConfig
 from scraper.wikidata_deprecated.orm import ScraperDatabase, SourceFact
 
@@ -67,11 +67,7 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
                 "ratings": {"esrb": {"rating": "M", "rating_generated": True}},
                 "content_descriptors": {"ids": [2]},
                 "package_groups": [
-                    {
-                        "subs": [
-                            {"packageid": 10, "currency": "USD", "price_in_cents": 1000}
-                        ]
-                    }
+                    {"subs": [{"packageid": 10, "currency": "USD", "price_in_cents": 1000}]}
                 ],
                 "bundles": [
                     {
@@ -89,9 +85,9 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
                 ],
                 "achievements": [
                     {
-                            "name": "First",
-                            "apiname": "FIRST",
-                            "displayName": "First",
+                        "name": "First",
+                        "apiname": "FIRST",
+                        "displayName": "First",
                         "description": "Start",
                         "percent": 50,
                     }
@@ -181,6 +177,61 @@ async def test_steam_details_are_persisted_in_tz_tables(tmp_path) -> None:
             await session.commit()
             assert await session.get(SteamApp, 42)
             assert await session.get(SteamEdition, 10)
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_removing_an_app_preserves_shared_package_and_bundle_relations(tmp_path) -> None:
+    database = ScraperDatabase(
+        ScraperConfig(
+            database_url=f"sqlite+aiosqlite:///{(tmp_path / 'shared-package.sqlite3').as_posix()}"
+        )
+    )
+    try:
+        await database.create_schema()
+        app_one = parse_app_details(
+            {
+                "name": "First game",
+                "type": "Game",
+                "package_groups": [{"subs": [{"packageid": 10, "price_in_cents": 1000}]}],
+            },
+            normalize_locale("en-US"),
+            app_id=1,
+            store_country="KZ",
+            store_browse={
+                "purchase_options": [
+                    {
+                        "bundleid": 100,
+                        "original_price_in_cents": 1000,
+                        "final_price_in_cents": 1000,
+                    }
+                ],
+                "_bundle_memberships": {100: [10]},
+            },
+        )
+        app_two = parse_app_details(
+            {
+                "name": "Second game",
+                "type": "Game",
+                "package_groups": [{"subs": [{"packageid": 10, "price_in_cents": 1000}]}],
+            },
+            normalize_locale("en-US"),
+            app_id=2,
+            store_country="KZ",
+        )
+        async with database.session() as session:
+            await persist_steam_scope(session, 1, "details:en-US:kz", app_one)
+            await persist_steam_scope(session, 2, "details:en-US:kz", app_two)
+            await session.commit()
+        async with database.session() as session:
+            await remove_all_steam_data(session, 1)
+            await session.commit()
+        async with database.session() as session:
+            assert await session.get(SteamApp, 1) is None
+            assert await session.get(SteamAppEdition, (2, 10)) is not None
+            assert await session.get(SteamEdition, 10) is not None
+            assert await session.get(SteamBundleEdition, (100, 10)) is not None
     finally:
         await database.dispose()
 

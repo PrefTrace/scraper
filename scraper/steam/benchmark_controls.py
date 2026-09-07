@@ -19,7 +19,6 @@ from .parsers import (
     parse_appinfo_semantics,
     parse_build_branches,
     parse_bundle_membership,
-    parse_country_restrictions,
     parse_descriptors,
     parse_external_links,
     parse_global_achievement_percentages,
@@ -146,11 +145,31 @@ def _run_case(case: dict[str, Any], manifest_path: Path) -> tuple[bool, str]:
             "final": price.final,
             "discount_percent": price.discount_percent,
             "price_region": price.price_region,
+            "discount_type": price.discount_type,
+            "discount_end_at": price.discount_end_at,
         }
         wanted = {key: expected[key] for key in actual if key in expected}
         if any(actual[key] != value for key, value in wanted.items()):
             return False, f"price={actual!r}, expected={wanted!r}"
+        if expected.get("discount_end_at_non_null") and price.discount_end_at is None:
+            return False, "discount_end_at=None"
         return True, "regional price fields matched"
+
+    if kind == "edition_price":
+        parsed = parse_app_details(
+            raw if isinstance(raw, dict) else {},
+            normalize_locale("en-US"),
+            store_country="US",
+        )
+        prices = {item.package_id: item for item in parsed.get("edition_prices", [])}
+        package_id = int(expected["package_id"])
+        price = prices.get(package_id)
+        if price is None:
+            return False, f"package {package_id} missing"
+        for key in ("initial", "final", "discount_percent", "price_region"):
+            if key in expected and getattr(price, key) != expected[key]:
+                return False, f"{key}={getattr(price, key)!r}, expected={expected[key]!r}"
+        return True, "AppDetails free-package observation matched"
 
     if kind == "descriptor":
         values = parse_descriptors(raw if isinstance(raw, dict) else {})
@@ -217,18 +236,6 @@ def _run_case(case: dict[str, Any], manifest_path: Path) -> tuple[bool, str]:
         ):
             return False, f"credits={credits!r}"
         return True, "creator identity and credited_name matched"
-
-    if kind == "restriction":
-        restrictions = parse_country_restrictions(raw if isinstance(raw, dict) else {})
-        wanted = expected.get("restriction") or {}
-        if not any(
-            item.package_id == wanted.get("package_id")
-            and item.restriction_type == wanted.get("restriction_type")
-            and item.country_code == wanted.get("country_code")
-            for item in restrictions
-        ):
-            return False, f"restrictions={restrictions!r}"
-        return True, "country restriction stayed separate from regional price"
 
     if kind == "workshop":
         stats = parse_workshop_stats(
